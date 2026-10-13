@@ -45,10 +45,17 @@ def health_check():
     """서버 상태 및 API 키 설정 여부 확인"""
     load_dotenv(dotenv_path=ENV_PATH, override=True)
     env_key = os.getenv("GEMINI_API_KEY", "").strip()
+    default_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     return {
         "status": "healthy",
         "has_api_key": bool(env_key),
-        "model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        "model": default_model,
+        "supported_models": [
+            {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "desc": "기본값, 빠르고 안정적"},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "desc": "정밀 번역"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "desc": "초고속 차세대"},
+        ],
+        "free_mode_supported": True,
     }
 
 
@@ -61,10 +68,12 @@ def natural_sort_key(s: str):
 async def translate_comic(
     file: UploadFile = File(...),
     x_gemini_api_key: Optional[str] = Header(None, alias="X-Gemini-Api-Key"),
+    x_gemini_model: Optional[str] = Header(None, alias="X-Gemini-Model"),
+    x_free_mode: Optional[str] = Header(None, alias="X-Free-Mode"),
 ):
     """
     만화 이미지(JPG/PNG/WEBP) 또는 이미지들이 압축된 ZIP 파일을 업로드받아
-    gemini-3.8-flash 모델을 통해 대사를 번역 및 식자 합성하여 반환합니다.
+    선택한 Gemini 모델(또는 무료 모드)을 통해 대사를 번역 및 식자 합성하여 반환합니다.
     - 단일 이미지: JPG 바이너리 반환 (image/jpeg)
     - ZIP 압축 파일: 번역된 이미지들이 담긴 ZIP 바이너리 반환 (application/zip)
     """
@@ -74,6 +83,7 @@ async def translate_comic(
         "application/x-zip-compressed",
         "multipart/x-zip",
     ]
+    is_free = (x_free_mode or "").strip().lower() in ["true", "1", "yes"]
 
     file_bytes = await file.read()
     if not file_bytes:
@@ -120,7 +130,7 @@ async def translate_comic(
                         detail="ZIP 파일 안에 처리 가능한 이미지(JPG, PNG, WebP)가 없습니다."
                     )
 
-                logger.info(f"[ZIP Batch] Total {len(all_entries)} images found in {filename}.")
+                logger.info(f"[ZIP Batch] Total {len(all_entries)} images found in {filename} (Model: {x_gemini_model}, Free: {is_free}).")
 
                 # 결과 ZIP 생성
                 out_zip_io = io.BytesIO()
@@ -143,6 +153,8 @@ async def translate_comic(
                                 image_bytes=raw_img_bytes,
                                 mime_type=mime_type,
                                 api_key=x_gemini_api_key,
+                                model_name=x_gemini_model,
+                                is_free_mode=is_free,
                             )
                             total_dialogues += len(detections)
 
@@ -175,7 +187,9 @@ async def translate_comic(
                     "X-Total-Pages": str(len(all_entries)),
                     "X-Failed-Count": str(len(failed_pages)),
                     "X-Is-Zip": "true",
-                    "Access-Control-Expose-Headers": "Content-Disposition, X-Dialogue-Count, X-Total-Pages, X-Failed-Count, X-Is-Zip",
+                    "X-Applied-Model": x_gemini_model or "gemini-1.5-flash",
+                    "X-Used-Mode": "free" if is_free else "api",
+                    "Access-Control-Expose-Headers": "Content-Disposition, X-Dialogue-Count, X-Total-Pages, X-Failed-Count, X-Is-Zip, X-Applied-Model, X-Used-Mode",
                 }
             )
         except HTTPException:
@@ -204,12 +218,14 @@ async def translate_comic(
 
     mime_type = file.content_type or "image/jpeg"
 
-    # Gemini AI 말풍선 인식 및 한국어 번역
+    # Gemini AI 말풍선 인식 및 한국어 번역 (또는 무료 모드)
     try:
         detections = detect_and_translate_comic(
             image_bytes=file_bytes,
             mime_type=mime_type,
             api_key=x_gemini_api_key,
+            model_name=x_gemini_model,
+            is_free_mode=is_free,
         )
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
@@ -241,7 +257,9 @@ async def translate_comic(
             "Content-Disposition": "inline; filename=translated.jpg",
             "X-Dialogue-Count": str(len(detections)),
             "X-Is-Zip": "false",
-            "Access-Control-Expose-Headers": "X-Dialogue-Count, X-Is-Zip",
+            "X-Applied-Model": x_gemini_model or "gemini-1.5-flash",
+            "X-Used-Mode": "free" if is_free else "api",
+            "Access-Control-Expose-Headers": "X-Dialogue-Count, X-Is-Zip, X-Applied-Model, X-Used-Mode",
         }
     )
 
@@ -250,6 +268,8 @@ async def translate_comic(
 async def translate_comic_with_metadata(
     file: UploadFile = File(...),
     x_gemini_api_key: Optional[str] = Header(None, alias="X-Gemini-Api-Key"),
+    x_gemini_model: Optional[str] = Header(None, alias="X-Gemini-Model"),
+    x_free_mode: Optional[str] = Header(None, alias="X-Free-Mode"),
 ):
     """
     디버그 및 풍부한 UI를 위해 번역 결과 이미지(Base64)와
@@ -261,6 +281,7 @@ async def translate_comic_with_metadata(
             detail="이미지 파일만 업로드할 수 있습니다."
         )
 
+    is_free = (x_free_mode or "").strip().lower() in ["true", "1", "yes"]
     image_bytes = await file.read()
     pil_image = Image.open(io.BytesIO(image_bytes))
     mime_type = file.content_type or "image/jpeg"
@@ -269,6 +290,8 @@ async def translate_comic_with_metadata(
         image_bytes=image_bytes,
         mime_type=mime_type,
         api_key=x_gemini_api_key,
+        model_name=x_gemini_model,
+        is_free_mode=is_free,
     )
 
     translated_pil = typeset_comic_image(pil_image, detections)
@@ -281,6 +304,8 @@ async def translate_comic_with_metadata(
         "success": True,
         "dialogue_count": len(detections),
         "dialogues": detections,
+        "model": x_gemini_model or "gemini-1.5-flash",
+        "free_mode": is_free,
         "image_data_url": f"data:image/jpeg;base64,{translated_b64}",
     })
 

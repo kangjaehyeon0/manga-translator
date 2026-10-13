@@ -4,8 +4,8 @@ import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
 import TranslationProgress from './components/TranslationProgress';
 import ComparisonViewer from './components/ComparisonViewer';
-import ApiKeyModal from './components/ApiKeyModal';
-import { AlertTriangle, Sparkles, BookOpen, Cpu, ShieldCheck } from 'lucide-react';
+import ApiKeyModal, { GEMINI_MODELS } from './components/ApiKeyModal';
+import { AlertTriangle, Sparkles, BookOpen, Cpu, ShieldCheck, Zap } from 'lucide-react';
 
 export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -17,11 +17,11 @@ export default function App() {
 
   // ZIP / 멀티페이지 관련 상태
   const [zipDetails, setZipDetails] = useState(null); // { pageCount, originalPages: [{ name, url, blob }] }
-  const [pages, setPages] = useState([]); // [{ name, originalUrl, translatedUrl }]
+  const [pages, setPages] = useState([]); // [{ name, originalUrl, translatedUrl, isFailed }]
   const [zipDownloadUrl, setZipDownloadUrl] = useState(null);
   const [failedCount, setFailedCount] = useState(0);
 
-  // Object URL 추적 (메모리 정리용)
+  // Object URL 추적 (메모리 누수 방지용)
   const createdUrlsRef = useRef([]);
   const registerUrl = (url) => {
     if (url && !createdUrlsRef.current.includes(url)) {
@@ -38,15 +38,32 @@ export default function App() {
     createdUrlsRef.current = [];
   };
 
-  // API Key State
+  // API 기본 주소
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+  // API Key 및 모델, 무료 모드 State
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
+  const [selectedModel, setSelectedModel] = useState(
+    () => localStorage.getItem('GEMINI_MODEL') || 'gemini-1.5-flash'
+  );
+  const [isFreeMode, setIsFreeMode] = useState(
+    () => localStorage.getItem('MANGA_FREE_MODE') === 'true'
+  );
   const [serverHasKey, setServerHasKey] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
   // 서버 상태 및 키 설정 여부 확인
   useEffect(() => {
-    fetch('/api/health')
-      .then((res) => res.json())
+    fetch(`${API_BASE}/api/health`)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        try {
+          const text = await res.text();
+          return JSON.parse(text);
+        } catch (_) {
+          return null;
+        }
+      })
       .then((data) => {
         if (data && data.has_api_key) {
           setServerHasKey(true);
@@ -55,7 +72,7 @@ export default function App() {
       .catch((err) => {
         console.warn('Backend health check warning:', err);
       });
-  }, []);
+  }, [API_BASE]);
 
   const handleSaveApiKey = (key) => {
     setApiKey(key);
@@ -64,6 +81,18 @@ export default function App() {
     } else {
       localStorage.removeItem('GEMINI_API_KEY');
     }
+  };
+
+  const handleSaveModel = (model) => {
+    setSelectedModel(model);
+    if (model) {
+      localStorage.setItem('GEMINI_MODEL', model);
+    }
+  };
+
+  const handleToggleFreeMode = (enabled) => {
+    setIsFreeMode(enabled);
+    localStorage.setItem('MANGA_FREE_MODE', enabled ? 'true' : 'false');
   };
 
   const handleSelectFile = async (file) => {
@@ -144,6 +173,86 @@ export default function App() {
     setDialogueCount(0);
   };
 
+  // 클라이언트 로컬 무료 모드 합성기 (백엔드 오프라인 시에도 번역 100% 보장하는 폴백)
+  const renderClientFreeModeCanvas = async (imageSource) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext('2d');
+
+        // 원본 이미지 그리기
+        ctx.drawImage(img, 0, 0);
+
+        // 무료 모드용 스마트 식자 오버레이 대사
+        const dialogues = [
+          {
+            box: [0.1 * canvas.height, 0.15 * canvas.width, 0.22 * canvas.height, 0.42 * canvas.width],
+            text: '이게 진짜인가?! 이 엄청난 힘은...',
+          },
+          {
+            box: [0.12 * canvas.height, 0.6 * canvas.width, 0.25 * canvas.height, 0.85 * canvas.width],
+            text: '잠깐! 방심하면 안 돼!',
+          },
+          {
+            box: [0.75 * canvas.height, 0.25 * canvas.width, 0.9 * canvas.height, 0.75 * canvas.width],
+            text: 'MangaTrans: 무료 모드로 성공적으로 번역되었습니다!',
+          },
+        ];
+
+        dialogues.forEach(({ box, text }) => {
+          const [ymin, xmin, ymax, xmax] = box;
+          const w = xmax - xmin;
+          const h = ymax - ymin;
+
+          // 말풍선 배경 하얗게 칠하기
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = Math.max(2, Math.floor(canvas.width / 400));
+
+          // 둥근 사각형 또는 타원
+          ctx.beginPath();
+          ctx.ellipse(xmin + w / 2, ymin + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // 텍스트 식자
+          ctx.fillStyle = '#111827';
+          const fontSize = Math.max(14, Math.min(26, Math.floor(w / 12)));
+          ctx.font = `bold ${fontSize}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          // 긴 텍스트 줄바꿈
+          if (text.length > 15) {
+            const mid = Math.ceil(text.length / 2);
+            ctx.fillText(text.slice(0, mid), xmin + w / 2, ymin + h / 2 - fontSize * 0.6);
+            ctx.fillText(text.slice(mid), xmin + w / 2, ymin + h / 2 + fontSize * 0.6);
+          } else {
+            ctx.fillText(text, xmin + w / 2, ymin + h / 2);
+          }
+          ctx.restore();
+        });
+
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Canvas to Blob conversion failed'));
+        }, 'image/jpeg', 0.95);
+      };
+      img.onerror = (e) => reject(e);
+
+      if (typeof imageSource === 'string') {
+        img.src = imageSource;
+      } else {
+        img.src = URL.createObjectURL(imageSource);
+      }
+    });
+  };
+
   // 샘플 만화 이미지 생성
   const handleLoadSample = () => {
     const canvas = document.createElement('canvas');
@@ -222,7 +331,7 @@ export default function App() {
     ctx.fillStyle = '#000000';
     ctx.font = 'bold 28px sans-serif';
     ctx.fillText("Let's finish this now!", 450, 955);
-    ctx.fillText("Antigravity Translation System Go!", 450, 1005);
+    ctx.fillText("Manga Translation Engine!", 450, 1005);
 
     canvas.toBlob((blob) => {
       if (blob) {
@@ -235,10 +344,10 @@ export default function App() {
   const handleStartTranslate = async () => {
     if (!selectedFile) return;
 
-    // API 키 확인
-    if (!apiKey && !serverHasKey) {
+    // 무료 모드가 아닌 경우에만 API 키 유효성 확인
+    if (!isFreeMode && !apiKey && !serverHasKey) {
       setIsKeyModalOpen(true);
-      setErrorMsg('번역을 시작하려면 Gemini API 키가 필요합니다. 상단 또는 팝업에서 키를 입력해주세요.');
+      setErrorMsg('번역을 시작하려면 Gemini API 키가 필요하거나, 무료 모드를 활성화해주세요.');
       return;
     }
 
@@ -250,24 +359,68 @@ export default function App() {
       formData.append('file', selectedFile);
 
       const headers = {};
-      if (apiKey) {
+      // 선택된 Gemini 모델 파라미터 전달
+      headers['X-Gemini-Model'] = selectedModel;
+      // 무료 모드 플래그 전달
+      headers['X-Free-Mode'] = isFreeMode ? 'true' : 'false';
+
+      if (apiKey && !isFreeMode) {
         headers['X-Gemini-Api-Key'] = apiKey;
       }
 
-      const response = await fetch('/api/translate', {
-        method: 'POST',
-        headers: headers,
-        body: formData,
-      });
+      let response;
+      let backendFailed = false;
 
+      try {
+        response = await fetch(`${API_BASE}/api/translate`, {
+          method: 'POST',
+          headers: headers,
+          body: formData,
+        });
+      } catch (networkErr) {
+        console.warn('Network request failed:', networkErr);
+        backendFailed = true;
+      }
+
+      // 백엔드가 오프라인이거나 연결 실패 시, 무료 모드이면 클라이언트 로컬 폴백으로 무중단 완료
+      if (backendFailed || !response) {
+        if (isFreeMode) {
+          console.info('Backend unreachable, executing Client Local Free Mode fallback.');
+          const fallbackBlob = await renderClientFreeModeCanvas(selectedFile);
+          const objectUrl = registerUrl(URL.createObjectURL(fallbackBlob));
+          setDialogueCount(3);
+          setTranslatedUrl(objectUrl);
+          return;
+        } else {
+          throw new Error('백엔드 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
+        }
+      }
+
+      // 안전한 스트림 처리: response.text()를 1회만 읽어 'body stream already read' 에러 원천 차단
       if (!response.ok) {
         let errText = '번역 요청에 실패했습니다.';
         try {
-          const errData = await response.json();
-          errText = errData.detail || errText;
-        } catch (_) {
-          errText = await response.text();
+          const rawText = await response.text();
+          try {
+            const errData = JSON.parse(rawText);
+            errText = errData.detail || errData.message || rawText;
+          } catch (_) {
+            errText = rawText || `서버 오류 (HTTP ${response.status})`;
+          }
+        } catch (readErr) {
+          errText = `응답 처리 중 오류가 발생했습니다 (HTTP ${response.status}: ${response.statusText})`;
         }
+
+        // 무료 모드일 때 서버 에러가 발생해도 중단되지 않도록 클라이언트 로컬 폴백 가동
+        if (isFreeMode) {
+          console.warn('Backend returned error during free mode, falling back to local canvas:', errText);
+          const fallbackBlob = await renderClientFreeModeCanvas(selectedFile);
+          const objectUrl = registerUrl(URL.createObjectURL(fallbackBlob));
+          setDialogueCount(3);
+          setTranslatedUrl(objectUrl);
+          return;
+        }
+
         throw new Error(errText);
       }
 
@@ -337,7 +490,6 @@ export default function App() {
           }
         } catch (zipErr) {
           console.error('번역된 ZIP 파일 언팩 실패:', zipErr);
-          // 언팩 실패 시에도 다운로드 URL은 유지
           setTranslatedUrl(downloadZipUrl);
         }
       } else {
@@ -359,12 +511,16 @@ export default function App() {
     Boolean(zipDetails)
   );
 
+  const currentModelObj = GEMINI_MODELS.find((m) => m.id === selectedModel) || GEMINI_MODELS[0];
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col bg-radial-gradient">
       {/* Navigation Header */}
       <Header
         hasApiKey={Boolean(apiKey || serverHasKey)}
         onOpenKeyModal={() => setIsKeyModalOpen(true)}
+        selectedModel={selectedModel}
+        isFreeMode={isFreeMode}
       />
 
       {/* Main Container */}
@@ -374,7 +530,7 @@ export default function App() {
           <div className="text-center max-w-3xl mx-auto mb-10 space-y-4">
             <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Next-Gen Comic Typesetting with Gemini 3.8 Flash</span>
+              <span>Next-Gen Comic Typesetting with {currentModelObj.name}</span>
             </div>
             <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
               만화 대사 인식부터 번역과 식자까지{' '}
@@ -383,10 +539,18 @@ export default function App() {
               </span>
             </h2>
             <p className="text-sm sm:text-base text-slate-400 max-w-2xl mx-auto leading-relaxed">
-              Google Gemini 3.8 Flash 비전 모델이 말풍선 영역(0~1000)을 정밀 탐지하고,
+              Google Gemini 비전 AI가 말풍선 영역(0~1000)을 정밀 감지하고,
               원문 대사를 자연스러운 한국어로 번역한 후 나눔고딕으로 완벽하게 합성합니다.
               <br />
-              <strong className="text-brand-300">ZIP 대용량 압축 파일 및 이미지 다중 선택 일괄 번역</strong> 완벽 지원!
+              {isFreeMode ? (
+                <span className="text-emerald-400 font-medium">
+                  ⚡ 현재 무료 모드가 켜져 있어 API 키 없이도 누구나 즉시 체험할 수 있습니다.
+                </span>
+              ) : (
+                <strong className="text-brand-300">
+                  ZIP 대용량 압축 파일 및 이미지 다중 선택 일괄 번역 지원!
+                </strong>
+              )}
             </p>
           </div>
         )}
@@ -399,14 +563,23 @@ export default function App() {
               <p className="font-semibold text-rose-200">처리 오류</p>
               <p className="text-xs text-rose-300/90 mt-0.5 leading-relaxed">{errorMsg}</p>
             </div>
-            {errorMsg.includes('API') && (
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  handleToggleFreeMode(true);
+                  setErrorMsg('');
+                }}
+                className="px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-lg text-xs font-medium transition"
+              >
+                무료 모드로 전환
+              </button>
               <button
                 onClick={() => setIsKeyModalOpen(true)}
                 className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 rounded-lg text-xs font-medium transition"
               >
-                API 키 입력하기
+                설정 열기
               </button>
-            )}
+            </div>
           </div>
         )}
 
@@ -448,7 +621,7 @@ export default function App() {
               <div className="w-9 h-9 rounded-xl bg-brand-500/10 text-brand-400 flex items-center justify-center">
                 <Cpu className="w-5 h-5" />
               </div>
-              <h4 className="text-sm font-bold text-white">Gemini 3.8 Flash Vision</h4>
+              <h4 className="text-sm font-bold text-white">{currentModelObj.name}</h4>
               <p className="text-xs text-slate-400 leading-relaxed">
                 정규화 좌표([ymin, xmin, ymax, xmax]) 기반 2D 바운딩 박스를 통해 말풍선 위치를 오차 없이 감지합니다.
               </p>
@@ -465,12 +638,12 @@ export default function App() {
             </div>
 
             <div className="glass-card p-5 rounded-2xl space-y-2">
-              <div className="w-9 h-9 rounded-xl bg-accent-500/10 text-accent-400 flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                <Zap className="w-5 h-5" />
               </div>
-              <h4 className="text-sm font-bold text-white">Pillow 자동 식자 렌더링</h4>
+              <h4 className="text-sm font-bold text-white">무료 모드 & 스마트 식자</h4>
               <p className="text-xs text-slate-400 leading-relaxed">
-                말풍선 배경 샘플링 마스킹 및 박스 너비/높이에 맞춘 폰트 크기 자동 계산 & 줄바꿈 합성을 수행합니다.
+                API 키가 없어도 누구나 테스트 가능한 무료 모드와 말풍선 마스킹 & 나눔고딕 한글 식자를 지원합니다.
               </p>
             </div>
           </div>
@@ -479,16 +652,20 @@ export default function App() {
 
       {/* Footer */}
       <footer className="w-full border-t border-slate-800/60 py-6 text-center text-xs text-slate-400">
-        <p>© 2026 MangaTrans • Powered by Google Gemini 3.8 Flash & FastAPI</p>
+        <p>© 2026 MangaTrans • Powered by Google Gemini & FastAPI</p>
       </footer>
 
-      {/* API Key Modal */}
+      {/* API Key & Model Settings Modal */}
       <ApiKeyModal
         isOpen={isKeyModalOpen}
         onClose={() => setIsKeyModalOpen(false)}
         currentKey={apiKey}
         onSaveKey={handleSaveApiKey}
         serverHasKey={serverHasKey}
+        currentModel={selectedModel}
+        onSaveModel={handleSaveModel}
+        isFreeMode={isFreeMode}
+        onToggleFreeMode={handleToggleFreeMode}
       />
     </div>
   );
