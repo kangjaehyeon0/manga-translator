@@ -51,9 +51,13 @@ export default function App() {
 
   // API Key 및 모델, 무료 모드 State (백엔드 통신 없음 - 100% 브라우저 로컬 스토리지 보관)
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
-  const [selectedModel, setSelectedModel] = useState(
-    () => localStorage.getItem('GEMINI_MODEL') || 'gemini-1.5-flash'
-  );
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const saved = localStorage.getItem('GEMINI_MODEL');
+    if (saved === 'gemini-1.5-pro' || saved === 'gemini-2.0-flash') {
+      return saved;
+    }
+    return 'gemini-1.5-flash';
+  });
   const [isFreeMode, setIsFreeMode] = useState(
     () => localStorage.getItem('MANGA_FREE_MODE') === 'true'
   );
