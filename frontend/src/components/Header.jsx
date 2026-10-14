@@ -2,16 +2,15 @@ import React from 'react';
 import { Sparkles, Key, CheckCircle, AlertCircle, Zap, Cpu } from 'lucide-react';
 
 const MODEL_LABELS = {
-  'gemini-1.5-flash': 'Gemini 1.5 Flash',
-  'gemini-1.5-pro': 'Gemini 1.5 Pro',
-  'gemini-2.0-flash': 'Gemini 2.0 Flash',
+  'gemini-3.5-flash': 'Gemini 3.5 Flash',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'gemini-flash-latest': 'Gemini Flash Latest',
 };
 
 export default function Header({
   hasApiKey,
   onOpenKeyModal,
-  selectedModel = 'gemini-1.5-flash',
+  selectedModel = 'gemini-3.5-flash',
   isFreeMode = false,
 }) {
   const modelDisplayName = MODEL_LABELS[selectedModel] || selectedModel;

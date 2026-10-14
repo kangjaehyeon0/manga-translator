@@ -204,18 +204,19 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob, f
 
   const cleanKey = apiKey.trim();
 
-  // 모델명 정규화
-  let targetModel = 'gemini-1.5-flash';
-  if (model && (model === 'gemini-1.5-pro' || model === 'gemini-2.0-flash')) {
-    targetModel = model;
+  // 모델명 정규화 및 가용 모델 목록 구성 (404/503 시 자동 폴백)
+  const candidateModels = [];
+  if (model && model.startsWith('gemini-') && !model.includes('1.5') && !model.includes('2.5')) {
+    candidateModels.push(model);
   }
+  if (!candidateModels.includes('gemini-3.5-flash')) candidateModels.push('gemini-3.5-flash');
+  if (!candidateModels.includes('gemini-flash-latest')) candidateModels.push('gemini-flash-latest');
+  if (!candidateModels.includes('gemini-3.8-flash')) candidateModels.push('gemini-3.8-flash');
 
   // 1. 이미지를 순수 Base64 데이터 및 정확한 MimeType(WebP/PNG/JPEG)으로 변환
   const { mimeType, base64Data } = await blobToBase64(imageBlob, fileName);
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-
-  // 2. Google Gemini 공식 API Request Payload 구성 (BLOCK_NONE 우선 시도, 실패 시 BLOCK_ONLY_HIGH 폴백)
+  // 2. Google Gemini 공식 API Request Payload 구성
   const buildPayload = (safety) => ({
     contents: [
       {
@@ -235,39 +236,54 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob, f
     safetySettings: safety,
   });
 
-  let response;
-  // 1차 시도: 사용자가 지정한 완전 해제(BLOCK_NONE) 시도
-  try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(buildPayload(NONE_SAFETY_SETTINGS)),
-    });
-  } catch (netErr) {
-    console.error('[Gemini API Network Error] 구글 엔드포인트 통신 실패:', netErr);
-    const err = new Error(`Google Gemini 서버 연결 실패: 인터넷 연결 또는 브라우저 CORS를 확인해주세요. (${netErr.message})`);
-    err.originalError = netErr;
-    throw err;
-  }
+  let response = null;
+  let lastUsedModel = candidateModels[0];
 
-  // 만약 BLOCK_NONE으로 인해 400 Invalid Argument가 발생했다면 BLOCK_ONLY_HIGH로 자동 2차 재시도
-  if (!response.ok && response.status === 400) {
+  // 후보 모델들을 순서대로 시도 (404 Not Found 또는 503 과부하 발생 시 다음 모델로 즉시 폴백)
+  for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
+    lastUsedModel = candidateModels[mIdx];
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${lastUsedModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+
     try {
-      const errorJson = await response.clone().json();
-      const msg = errorJson?.error?.message || '';
-      if (msg.includes('safety') || msg.includes('BLOCK_NONE') || msg.includes('Invalid') || msg.includes('allowed')) {
-        console.warn('[Gemini API Fallback] BLOCK_NONE이 무료 계정에서 거부됨 -> 공식 호환 BLOCK_ONLY_HIGH로 재전송합니다:', msg);
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(buildPayload(LENIENT_SAFETY_SETTINGS)),
-        });
+      // 1차 시도: 완전 해제(BLOCK_NONE) 시도
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload(NONE_SAFETY_SETTINGS)),
+      });
+
+      // 만약 BLOCK_NONE으로 인해 400 에러가 발생한 경우 BLOCK_ONLY_HIGH로 자동 2차 재시도
+      if (!response.ok && response.status === 400) {
+        try {
+          const errorJson = await response.clone().json();
+          const msg = errorJson?.error?.message || '';
+          if (msg.includes('safety') || msg.includes('BLOCK_NONE') || msg.includes('Invalid') || msg.includes('allowed')) {
+            console.warn('[Gemini API Fallback] BLOCK_NONE 거부 -> BLOCK_ONLY_HIGH로 재전송:', msg);
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(buildPayload(LENIENT_SAFETY_SETTINGS)),
+            });
+          }
+        } catch (_) {}
       }
-    } catch (_) {}
+
+      // 404(단종된 모델) 또는 503(과부하)인 경우 다음 최신 모델로 재시도
+      if (!response.ok && (response.status === 404 || response.status === 503) && mIdx < candidateModels.length - 1) {
+        console.warn(`[Gemini Model Fallback] '${lastUsedModel}' (${response.status}) 사용 불가 -> '${candidateModels[mIdx + 1]}'로 자동 전환 시도합니다.`);
+        continue;
+      }
+
+      // 성공 또는 일반 응답이면 루프 탈출
+      break;
+    } catch (netErr) {
+      if (mIdx === candidateModels.length - 1) {
+        console.error('[Gemini API Network Error] 구글 엔드포인트 통신 실패:', netErr);
+        const err = new Error(`Google Gemini 서버 연결 실패: 인터넷 연결 또는 브라우저 CORS를 확인해주세요. (${netErr.message})`);
+        err.originalError = netErr;
+        throw err;
+      }
+    }
   }
 
   if (!response.ok) {
@@ -293,10 +309,10 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob, f
     console.error('[Gemini API Detailed Error]', {
       status: response.status,
       statusText: response.statusText,
-      model: targetModel,
+      model: lastUsedModel,
       mimeType,
       errorDetails,
-      endpoint: endpoint.replace(cleanKey, '***API_KEY***'),
+      endpoint: `https://generativelanguage.googleapis.com/v1beta/models/${lastUsedModel}:generateContent?key=***API_KEY***`,
     });
 
     throw apiError;

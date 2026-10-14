@@ -3,22 +3,22 @@ import { X, Key, ExternalLink, ShieldCheck, Trash2, Cpu, Zap, Check } from 'luci
 
 export const GEMINI_MODELS = [
   {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash (기본값)',
-    desc: '빠르고 안정적 • 권장 모델',
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash (권장 • 안정)',
+    desc: '가장 빠르고 안정적인 만화 번역 비전 엔진',
     badge: '추천',
   },
   {
-    id: 'gemini-1.5-pro',
-    name: 'Gemini 1.5 Pro (정밀 번역)',
-    desc: '복잡한 만화 및 고품질 번역',
-    badge: '고품질',
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    desc: '최신 플래그십 고속 비전 모델',
+    badge: '최신',
   },
   {
-    id: 'gemini-2.0-flash',
-    name: 'Gemini 2.0 Flash',
-    desc: '최신 초고속 비전 아키텍처',
-    badge: 'New',
+    id: 'gemini-flash-latest',
+    name: 'Gemini Flash Latest',
+    desc: 'Google 최신 안정 플래시 자동 매핑',
+    badge: 'Auto',
   },
 ];
 
@@ -28,13 +28,13 @@ export default function ApiKeyModal({
   currentKey,
   onSaveKey,
   serverHasKey,
-  currentModel = 'gemini-1.5-flash',
+  currentModel = 'gemini-3.5-flash',
   onSaveModel,
   isFreeMode = false,
   onToggleFreeMode,
 }) {
   const [inputKey, setInputKey] = useState(currentKey || '');
-  const [selectedModel, setSelectedModel] = useState(currentModel || 'gemini-1.5-flash');
+  const [selectedModel, setSelectedModel] = useState(currentModel || 'gemini-3.5-flash');
   const [freeModeActive, setFreeModeActive] = useState(isFreeMode);
 
   useEffect(() => {
@@ -42,7 +42,7 @@ export default function ApiKeyModal({
   }, [currentKey]);
 
   useEffect(() => {
-    setSelectedModel(currentModel || 'gemini-1.5-flash');
+    setSelectedModel(currentModel || 'gemini-3.5-flash');
   }, [currentModel]);
 
   useEffect(() => {

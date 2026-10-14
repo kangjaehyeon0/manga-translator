@@ -6,7 +6,7 @@ export default function TranslationProgress({
   pageCount = 0,
   currentPage = 0,
   progressText = '',
-  selectedModel = 'gemini-1.5-flash',
+  selectedModel = 'gemini-3.5-flash',
   isFreeMode = false,
 }) {
   const [currentStep, setCurrentStep] = useState(0);

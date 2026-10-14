@@ -53,10 +53,10 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = localStorage.getItem('GEMINI_MODEL');
-    if (saved === 'gemini-1.5-pro' || saved === 'gemini-2.0-flash') {
+    if (saved === 'gemini-3.8-flash' || saved === 'gemini-flash-latest') {
       return saved;
     }
-    return 'gemini-1.5-flash';
+    return 'gemini-3.5-flash';
   });
   const [isFreeMode, setIsFreeMode] = useState(
     () => localStorage.getItem('MANGA_FREE_MODE') === 'true'
@@ -311,7 +311,7 @@ export default function App() {
             try {
               detections = await detectAndTranslateWithGemini({
                 apiKey: apiKey.trim(),
-                model: selectedModel || 'gemini-1.5-flash',
+                model: selectedModel || 'gemini-3.5-flash',
                 imageBlob: page.blob,
                 fileName: page.name,
               });
@@ -324,7 +324,7 @@ export default function App() {
                 try {
                   detections = await detectAndTranslateWithGemini({
                     apiKey: apiKey.trim(),
-                    model: selectedModel || 'gemini-1.5-flash',
+                    model: selectedModel || 'gemini-3.5-flash',
                     imageBlob: page.blob,
                     fileName: page.name,
                   });
@@ -410,7 +410,7 @@ export default function App() {
         setProgressText(
           isGuestOrFree
             ? '무료/게스트 모드로 브라우저 Canvas 즉시 식자 합성 중... (네트워크 통신 없음)'
-            : `${selectedModel || 'gemini-1.5-flash'} Google 공식 엔드포인트 직접 호출 중...`
+            : `${selectedModel || 'gemini-3.5-flash'} Google 공식 엔드포인트 직접 호출 중...`
         );
 
         let detections;
@@ -424,7 +424,7 @@ export default function App() {
           try {
             detections = await detectAndTranslateWithGemini({
               apiKey: apiKey.trim(),
-              model: selectedModel || 'gemini-1.5-flash',
+              model: selectedModel || 'gemini-3.5-flash',
               imageBlob: selectedFile,
               fileName: selectedFile.name,
             });
