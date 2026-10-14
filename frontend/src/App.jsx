@@ -244,15 +244,12 @@ export default function App() {
   };
 
   // 100% 브라우저(클라이언트) 내부 번역 및 식자 합성 파이프라인
+  // /api/translate 호출을 완전히 배제하고 Gemini 직접 연동 또는 순수 Canvas 로컬 합성으로 처리
   const handleStartTranslate = async () => {
     if (!selectedFile) return;
 
-    // 무료 모드가 아닌 경우 API 키 입력 필수 확인
-    if (!isFreeMode && !apiKey.trim()) {
-      setIsKeyModalOpen(true);
-      setErrorMsg('번역을 시작하려면 Gemini API 키를 입력하거나, 무료 모드를 켜주세요.');
-      return;
-    }
+    // API 키 유무 및 무료 모드 판별: API 키가 없거나 무료 모드인 경우 게스트/무료 모드로 동작
+    const isGuestOrFree = isFreeMode || !apiKey.trim();
 
     setIsTranslating(true);
     setErrorMsg('');
@@ -273,10 +270,14 @@ export default function App() {
         for (let i = 0; i < originalPages.length; i++) {
           const page = originalPages[i];
           setCurrentProgressPage(i + 1);
-          setProgressText(`${i + 1} / ${originalPages.length} 페이지 번역 및 식자 합성 중...`);
+          setProgressText(
+            isGuestOrFree
+              ? `${i + 1} / ${originalPages.length} 페이지 로컬 Canvas 식자 합성 중... (네트워크 통신 없음)`
+              : `${i + 1} / ${originalPages.length} 페이지 Gemini AI 직접 분석 및 식자 합성 중...`
+          );
 
-          if (isFreeMode) {
-            // 무료 모드: 로컬 캔버스 합성 파이프라인
+          if (isGuestOrFree) {
+            // [무료 / 게스트 모드] 네트워크 fetch 요청을 일절 시도하지 않고 브라우저 Canvas로 즉시 합성
             const detections = generateFreeModeDetections();
             const translatedBlob = await typesetComicImage(page.blob, detections);
             outZip.file(page.name, translatedBlob);
@@ -290,11 +291,11 @@ export default function App() {
               isFailed: false,
             });
           } else {
-            // Gemini 모드: 공식 API 직접 호출 및 Canvas 식자
+            // [Gemini 모드] /api/translate를 절대 호출하지 않고 구글 공식 엔드포인트로 브라우저 직접 요청
             try {
               const detections = await detectAndTranslateWithGemini({
-                apiKey,
-                model: selectedModel,
+                apiKey: apiKey.trim(),
+                model: selectedModel || 'gemini-1.5-flash',
                 imageBlob: page.blob,
               });
 
@@ -310,7 +311,7 @@ export default function App() {
                 isFailed: false,
               });
             } catch (pageErr) {
-              console.error(`[Manga Translator] '${page.name}' 페이지 처리 중 오류 발생:`, pageErr);
+              console.error(`[Manga Translator] '${page.name}' 페이지 Gemini 처리 중 오류 발생:`, pageErr);
               failedNum++;
               outZip.file(`failed_${page.name}`, page.blob);
 
@@ -339,20 +340,20 @@ export default function App() {
       } else {
         // ========== 단일 이미지 브라우저 클라이언트 처리 ==========
         setProgressText(
-          isFreeMode
-            ? '무료 모드로 로컬 Canvas 식자 합성 중...'
-            : `${selectedModel}로 만화 대사 및 말풍선 감지 중...`
+          isGuestOrFree
+            ? '무료/게스트 모드로 브라우저 Canvas 즉시 식자 합성 중... (네트워크 통신 없음)'
+            : `${selectedModel || 'gemini-1.5-flash'} Google 공식 엔드포인트 직접 호출 중...`
         );
 
         let detections;
-        if (isFreeMode) {
-          // 무료 모드: 가상 말풍선 및 대사 생성
+        if (isGuestOrFree) {
+          // [무료 / 게스트 모드] 네트워크 fetch 요청을 일절 시도하지 않고 브라우저 Canvas에서 안내 텍스트 합성
           detections = generateFreeModeDetections();
         } else {
-          // Gemini 모드: Google 공식 엔드포인트 직접 호출
+          // [Gemini 모드] 브라우저에서 직접 Google Gemini API 엔드포인트로 요청 (/api/translate 일절 호출 안 함)
           detections = await detectAndTranslateWithGemini({
-            apiKey,
-            model: selectedModel,
+            apiKey: apiKey.trim(),
+            model: selectedModel || 'gemini-1.5-flash',
             imageBlob: selectedFile,
           });
         }
@@ -361,11 +362,18 @@ export default function App() {
         const translatedBlob = await typesetComicImage(selectedFile, detections);
         const objectUrl = registerUrl(URL.createObjectURL(translatedBlob));
 
+        // 단일 이미지의 경우에도 ZIP 다운로드 파일로 완성 (순수 클라이언트 JSZip)
+        const singleZip = new JSZip();
+        const baseName = (selectedFile.name || 'comic').replace(/\.[^/.]+$/, '');
+        singleZip.file(`${baseName}_translated.jpg`, translatedBlob);
+        const singleZipBlob = await singleZip.generateAsync({ type: 'blob' });
+        const singleZipUrl = registerUrl(URL.createObjectURL(singleZipBlob));
+
+        setZipDownloadUrl(singleZipUrl);
         setDialogueCount(detections.length);
         setTranslatedUrl(objectUrl);
       }
     } catch (err) {
-      // 3. 처리 실패 시 개발자 콘솔(console.error)에 실제 구체적 에러 객체 출력
       console.error('[Manga Translator] 번역 처리 중 상세 오류 객체:', {
         message: err.message,
         status: err.status,
@@ -509,6 +517,8 @@ export default function App() {
               onStartTranslate={handleStartTranslate}
               onLoadSample={handleLoadSample}
               zipPageCount={zipDetails?.pageCount}
+              hasApiKey={Boolean(apiKey.trim())}
+              isFreeMode={isFreeMode}
             />
           </div>
         )}

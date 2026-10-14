@@ -11,6 +11,8 @@ export default function ImageUploader({
   onStartTranslate,
   isTranslating,
   onLoadSample,
+  hasApiKey = false,
+  isFreeMode = false,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [isPacking, setIsPacking] = useState(false);
@@ -246,13 +248,23 @@ export default function ImageUploader({
                 </div>
 
                 <div className="mt-4 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-1">
-                  <p className="font-semibold text-slate-200">
-                    {isZip ? '📦 ZIP 압축 일괄 번역 파이프라인 안내' : '🔍 번역 파이프라인 안내'}
+                  <p className="font-semibold text-slate-200 flex items-center gap-1.5">
+                    {isFreeMode || !hasApiKey ? (
+                      <span className="text-emerald-400 font-bold">⚡ 무료 / 게스트 모드 안내</span>
+                    ) : (
+                      <span className="text-brand-300 font-bold">✨ Gemini API 연동 모드 안내</span>
+                    )}
                   </p>
                   <p className="text-slate-400 leading-relaxed">
-                    {isZip
-                      ? '압축 파일 내의 만화 이미지들을 순서대로 감지하여 Gemini 3.8 Flash로 대사를 번역하고 식자 합성한 뒤, 번역된 전체 ZIP 파일로 완성합니다.'
-                      : 'Gemini 3.8 Flash가 이미지 내 말풍선 텍스트와 좌표(0~1000)를 감지하고, 배경 마스킹 후 최적의 글자 크기로 한국어 대사를 합성합니다.'}
+                    {isFreeMode || !hasApiKey ? (
+                      isZip
+                        ? '압축 파일 내 만화 이미지들을 브라우저 Canvas 로컬 엔진으로 즉시 순회 식자 합성하여 최종 번역 ZIP 파일로 완성합니다. (네트워크 호출 없음)'
+                        : '브라우저 HTML5 Canvas를 사용하여 대사 마스킹 및 한국어 식자 텍스트를 즉시 합성하고 ZIP 다운로드 파일을 생성합니다. (네트워크 통신 없음)'
+                    ) : (
+                      isZip
+                        ? '압축 파일 내의 만화 이미지들을 순서대로 Gemini API 공식 엔드포인트로 직접 분석하여 대사를 번역하고 식자 합성한 뒤, 번역된 전체 ZIP 파일로 완성합니다.'
+                        : 'Google Gemini 비전 모델로 이미지 내 말풍선 텍스트와 좌표(0~1000)를 브라우저에서 직접 감지하고, 배경 마스킹 후 최적의 글자 크기로 한국어 대사를 합성합니다.'
+                    )}
                   </p>
                 </div>
               </div>
@@ -271,10 +283,22 @@ export default function ImageUploader({
                   type="button"
                   onClick={onStartTranslate}
                   disabled={isTranslating || isPacking}
-                  className="px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-brand-600 via-indigo-600 to-accent-600 hover:from-brand-500 hover:via-indigo-500 hover:to-accent-500 transition shadow-lg shadow-brand-500/25 flex items-center space-x-2 disabled:opacity-50 cursor-pointer"
+                  className={`px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white transition shadow-lg flex items-center space-x-2 disabled:opacity-50 cursor-pointer ${
+                    isFreeMode || !hasApiKey
+                      ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 shadow-emerald-600/25'
+                      : 'bg-gradient-to-r from-brand-600 via-indigo-600 to-accent-600 hover:from-brand-500 hover:via-indigo-500 hover:to-accent-500 shadow-brand-500/25'
+                  }`}
                 >
-                  <Sparkles className="w-4 h-4 text-brand-300" />
-                  <span>{isZip ? '전체 일괄 번역 & 식자 시작' : '한국어로 번역 & 식자 합성 시작'}</span>
+                  <Sparkles className="w-4 h-4 text-white" />
+                  <span>
+                    {isFreeMode || !hasApiKey
+                      ? isZip
+                        ? '무료 게스트 모드로 ZIP 일괄 식자 시작'
+                        : '무료 게스트 모드로 식자 합성 시작'
+                      : isZip
+                      ? 'Gemini AI로 전체 일괄 번역 & 식자 시작'
+                      : '한국어로 번역 & 식자 합성 시작'}
+                  </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>

@@ -210,19 +210,19 @@ export function findBestFontAndLines(ctx, text, maxW, maxH, minSize = 11, maxSiz
 export function generateFreeModeDetections() {
   return [
     {
-      box_2d: [100, 150, 240, 420],
-      original_text: 'Is this real?! This incredible power...',
-      translated_text: '이게 진짜인가?! 이 엄청난 힘은...',
+      box_2d: [120, 120, 260, 480],
+      original_text: '[GUEST MODE] Speech bubble detected!',
+      translated_text: '[게스트/무료 모드] 만화 대사 영역 감지 완료!',
     },
     {
-      box_2d: [120, 600, 260, 850],
-      original_text: "Wait! Don't let your guard down!",
-      translated_text: '잠깐! 방심하면 안 돼!',
+      box_2d: [140, 560, 280, 880],
+      original_text: 'Canvas offline typesetting complete!',
+      translated_text: '브라우저 Canvas 로컬 엔진으로 식자 합성 완료!',
     },
     {
-      box_2d: [750, 220, 910, 780],
-      original_text: 'MangaTrans: Free Mode Typesetting Complete!',
-      translated_text: 'MangaTrans: 무료 모드로 브라우저에서 식자 합성 완료!',
+      box_2d: [760, 160, 920, 840],
+      original_text: 'Enter Gemini API Key to activate AI translation!',
+      translated_text: '상단 [API 키 설정]에서 Gemini 키를 입력하면 AI 자동 번역이 활성화됩니다!',
     },
   ];
 }
