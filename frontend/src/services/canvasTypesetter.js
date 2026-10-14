@@ -228,6 +228,25 @@ export function generateFreeModeDetections() {
 }
 
 /**
+ * Gemini AI 안전 필터(SAFETY Block) 차단 시 대체 식자 데이터 생성
+ * 성인/선정성/민감성 검열로 인해 AI 응답이 거부되었을 때 원본 이미지에 로컬 대체 식자를 적용합니다.
+ */
+export function generateSafetyBlockDetections() {
+  return [
+    {
+      box_2d: [100, 120, 240, 880],
+      original_text: '[Gemini Safety Filter Blocked]',
+      translated_text: '⚠️ [안내] Gemini AI 안전 필터(선정성/민감도)에 의해 자동 번역이 차단되었습니다.',
+    },
+    {
+      box_2d: [760, 140, 910, 860],
+      original_text: '[Local Typesetting Fallback Applied]',
+      translated_text: '✨ [로컬 엔진] 원본 이미지를 유지하며 대체 식자를 합성하여 ZIP에 보존했습니다.',
+    },
+  ];
+}
+
+/**
  * 만화 이미지에 대사 감지 결과(detections)를 식자 합성(Typesetting)하여 Blob 생성
  * @param {Blob|File|string} imageSource - 원본 이미지
  * @param {Array<{box_2d: number[], translated_text: string}>} detections - 말풍선 및 번역 대사 목록

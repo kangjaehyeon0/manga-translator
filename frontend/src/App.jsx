@@ -7,7 +7,11 @@ import ComparisonViewer from './components/ComparisonViewer';
 import ApiKeyModal, { GEMINI_MODELS } from './components/ApiKeyModal';
 import { AlertTriangle, Sparkles, BookOpen, Cpu, ShieldCheck, Zap } from 'lucide-react';
 import { detectAndTranslateWithGemini } from './services/geminiService';
-import { typesetComicImage, generateFreeModeDetections } from './services/canvasTypesetter';
+import {
+  typesetComicImage,
+  generateFreeModeDetections,
+  generateSafetyBlockDetections,
+} from './services/canvasTypesetter';
 
 export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -23,9 +27,10 @@ export default function App() {
 
   // ZIP / 멀티페이지 관련 상태
   const [zipDetails, setZipDetails] = useState(null); // { pageCount, originalPages: [{ name, url, blob }] }
-  const [pages, setPages] = useState([]); // [{ name, originalUrl, translatedUrl, isFailed }]
+  const [pages, setPages] = useState([]); // [{ name, originalUrl, translatedUrl, isFailed, isSafetyBlocked }]
   const [zipDownloadUrl, setZipDownloadUrl] = useState(null);
   const [failedCount, setFailedCount] = useState(0);
+  const [safetyBlockedCount, setSafetyBlockedCount] = useState(0);
 
   // Object URL 추적 (메모리 누수 방지용)
   const createdUrlsRef = useRef([]);
@@ -84,6 +89,7 @@ export default function App() {
     setZipDownloadUrl(null);
     setZipDetails(null);
     setFailedCount(0);
+    setSafetyBlockedCount(0);
 
     const isZip = file.name.toLowerCase().endsWith('.zip') || file.type?.includes('zip');
 
@@ -149,6 +155,7 @@ export default function App() {
     setZipDownloadUrl(null);
     setZipDetails(null);
     setFailedCount(0);
+    setSafetyBlockedCount(0);
     setErrorMsg('');
     setDialogueCount(0);
     setCurrentProgressPage(0);
@@ -265,6 +272,7 @@ export default function App() {
         const outZip = new JSZip();
         let totalDialogues = 0;
         let failedNum = 0;
+        let safetyBlockedNum = 0;
         const matchedPages = [];
 
         for (let i = 0; i < originalPages.length; i++) {
@@ -273,7 +281,7 @@ export default function App() {
           setProgressText(
             isGuestOrFree
               ? `${i + 1} / ${originalPages.length} 페이지 로컬 Canvas 식자 합성 중... (네트워크 통신 없음)`
-              : `${i + 1} / ${originalPages.length} 페이지 Gemini AI 직접 분석 및 식자 합성 중...`
+              : `${i + 1} / ${originalPages.length} 페이지 Gemini AI 직접 분석 중...`
           );
 
           if (isGuestOrFree) {
@@ -289,38 +297,91 @@ export default function App() {
               originalUrl: page.url,
               translatedUrl: pageTranslatedUrl,
               isFailed: false,
+              isSafetyBlocked: false,
             });
           } else {
-            // [Gemini 모드] /api/translate를 절대 호출하지 않고 구글 공식 엔드포인트로 브라우저 직접 요청
+            // [Gemini 모드] 1장씩 순차 요청 (429 Rate Limit 방지 및 2초 딜레이)
+            let detections = null;
+            let isPageSafetyBlocked = false;
+
             try {
-              const detections = await detectAndTranslateWithGemini({
+              detections = await detectAndTranslateWithGemini({
                 apiKey: apiKey.trim(),
                 model: selectedModel || 'gemini-1.5-flash',
                 imageBlob: page.blob,
               });
-
-              const translatedBlob = await typesetComicImage(page.blob, detections);
-              outZip.file(page.name, translatedBlob);
-              const pageTranslatedUrl = registerUrl(URL.createObjectURL(translatedBlob));
-              totalDialogues += detections.length;
-
-              matchedPages.push({
-                name: page.name,
-                originalUrl: page.url,
-                translatedUrl: pageTranslatedUrl,
-                isFailed: false,
-              });
             } catch (pageErr) {
-              console.error(`[Manga Translator] '${page.name}' 페이지 Gemini 처리 중 오류 발생:`, pageErr);
-              failedNum++;
-              outZip.file(`failed_${page.name}`, page.blob);
+              // 429 Too Many Requests (Rate Limit) 시 3.5초 대기 후 1회 재시도
+              if (pageErr.status === 429) {
+                console.warn(`[Manga Translator] '${page.name}' 429 Rate Limit 감지 -> 3.5초 후 1회 재시도합니다...`);
+                setProgressText(`${i + 1} / ${originalPages.length} 페이지 속도 제한 대기 중 (3초 후 재시도)...`);
+                await new Promise((r) => setTimeout(r, 3500));
+                try {
+                  detections = await detectAndTranslateWithGemini({
+                    apiKey: apiKey.trim(),
+                    model: selectedModel || 'gemini-1.5-flash',
+                    imageBlob: page.blob,
+                  });
+                } catch (retryErr) {
+                  pageErr = retryErr;
+                }
+              }
 
-              matchedPages.push({
-                name: page.name,
-                originalUrl: page.url,
-                translatedUrl: page.url,
-                isFailed: true,
-              });
+              // [요구사항 3] Gemini 안전 필터(SAFETY Block) 차단 발생 시 대체 식자 처리
+              if (
+                pageErr.isSafetyBlock ||
+                pageErr.message?.includes('SAFETY') ||
+                pageErr.message?.includes('Safety')
+              ) {
+                console.warn(
+                  `[Manga Translator] '${page.name}' 페이지 Gemini 안전 필터 차단 감지 (${pageErr.message}) -> 원본 보존 대신 로컬 대체 식자 합성 적용`
+                );
+                detections = generateSafetyBlockDetections();
+                isPageSafetyBlocked = true;
+                safetyBlockedNum++;
+              } else if (!detections) {
+                // 복구 불가능한 기타 오류인 경우 원본 보존 및 실패 등록
+                console.error(`[Manga Translator] '${page.name}' 페이지 Gemini 처리 중 오류 발생:`, pageErr);
+                failedNum++;
+                outZip.file(`failed_${page.name}`, page.blob);
+
+                matchedPages.push({
+                  name: page.name,
+                  originalUrl: page.url,
+                  translatedUrl: page.url,
+                  isFailed: true,
+                  isSafetyBlocked: false,
+                  errorMsg: pageErr.message,
+                });
+
+                // 실패하더라도 다음 요청 전 2초 딜레이
+                if (i < originalPages.length - 1) {
+                  await new Promise((r) => setTimeout(r, 2000));
+                }
+                continue;
+              }
+            }
+
+            // Canvas 식자 합성 (정상 대사 또는 검열 차단 대체 대사)
+            const translatedBlob = await typesetComicImage(page.blob, detections);
+            outZip.file(page.name, translatedBlob);
+            const pageTranslatedUrl = registerUrl(URL.createObjectURL(translatedBlob));
+            totalDialogues += detections.length;
+
+            matchedPages.push({
+              name: page.name,
+              originalUrl: page.url,
+              translatedUrl: pageTranslatedUrl,
+              isFailed: false,
+              isSafetyBlocked: isPageSafetyBlocked,
+            });
+
+            // [요구사항 2] 1장씩 순차 번역 후 각 요청 사이에 2초 딜레이 (Rate Limit 방지)
+            if (i < originalPages.length - 1) {
+              setProgressText(
+                `${i + 1} / ${originalPages.length} 페이지 완료. 속도 제한(RPM) 방지 쿨다운 중 (2초)...`
+              );
+              await new Promise((r) => setTimeout(r, 2000));
             }
           }
         }
@@ -333,6 +394,7 @@ export default function App() {
         setPages(matchedPages);
         setDialogueCount(totalDialogues);
         setFailedCount(failedNum);
+        setSafetyBlockedCount(safetyBlockedNum);
 
         if (matchedPages.length > 0) {
           setTranslatedUrl(matchedPages[0].translatedUrl);
@@ -346,16 +408,36 @@ export default function App() {
         );
 
         let detections;
+        let isSingleSafetyBlocked = false;
+
         if (isGuestOrFree) {
           // [무료 / 게스트 모드] 네트워크 fetch 요청을 일절 시도하지 않고 브라우저 Canvas에서 안내 텍스트 합성
           detections = generateFreeModeDetections();
         } else {
-          // [Gemini 모드] 브라우저에서 직접 Google Gemini API 엔드포인트로 요청 (/api/translate 일절 호출 안 함)
-          detections = await detectAndTranslateWithGemini({
-            apiKey: apiKey.trim(),
-            model: selectedModel || 'gemini-1.5-flash',
-            imageBlob: selectedFile,
-          });
+          // [Gemini 모드] 구글 공식 엔드포인트 직접 호출
+          try {
+            detections = await detectAndTranslateWithGemini({
+              apiKey: apiKey.trim(),
+              model: selectedModel || 'gemini-1.5-flash',
+              imageBlob: selectedFile,
+            });
+          } catch (singleErr) {
+            // 단일 이미지에서도 SAFETY 차단 시 로컬 대체 식자 적용
+            if (
+              singleErr.isSafetyBlock ||
+              singleErr.message?.includes('SAFETY') ||
+              singleErr.message?.includes('Safety')
+            ) {
+              console.warn(
+                `[Manga Translator] 단일 이미지 Gemini 안전 필터 차단 감지 (${singleErr.message}) -> 로컬 대체 식자 적용`
+              );
+              detections = generateSafetyBlockDetections();
+              isSingleSafetyBlocked = true;
+              setSafetyBlockedCount(1);
+            } else {
+              throw singleErr;
+            }
+          }
         }
 
         setProgressText('말풍선 배경 마스킹 및 한글 폰트 자동 식자 합성 중...');
@@ -372,6 +454,9 @@ export default function App() {
         setZipDownloadUrl(singleZipUrl);
         setDialogueCount(detections.length);
         setTranslatedUrl(objectUrl);
+        if (isSingleSafetyBlocked) {
+          setErrorMsg('⚠️ Gemini AI 안전 필터(성인/선정성)에 의해 자동 번역이 차단되어 로컬 대체 식자가 적용되었습니다.');
+        }
       }
     } catch (err) {
       console.error('[Manga Translator] 번역 처리 중 상세 오류 객체:', {
@@ -503,6 +588,7 @@ export default function App() {
             zipDownloadUrl={zipDownloadUrl}
             zipFileName={`translated_${selectedFile?.name || 'manga.zip'}`}
             failedCount={failedCount}
+            safetyBlockedCount={safetyBlockedCount}
           />
         )}
 

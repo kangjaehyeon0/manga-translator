@@ -106,6 +106,12 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob })
       responseMimeType: 'application/json',
       temperature: 0.2,
     },
+    safetySettings: [
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+    ],
   };
 
   let response;
@@ -157,6 +163,56 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob })
   }
 
   const responseData = await response.json();
+
+  // 1. promptFeedback 레벨의 안전 필터 차단 검사
+  const promptFeedback = responseData?.promptFeedback;
+  if (promptFeedback?.blockReason) {
+    const blockReason = promptFeedback.blockReason;
+    const safetyRatings = promptFeedback.safetyRatings || [];
+    const ratingSummary = safetyRatings
+      .map((r) => `${r.category}: ${r.probability}`)
+      .join(', ');
+
+    console.warn('[Gemini API Safety Block] 프롬프트가 안전 정책에 의해 차단되었습니다:', {
+      blockReason,
+      safetyRatings,
+      responseData,
+    });
+
+    const safetyError = new Error(
+      `Gemini AI 안전 필터 차단 (Prompt Block): 사유=${blockReason} [${ratingSummary || '성인/선정성/안전성 필터'}]`
+    );
+    safetyError.isSafetyBlock = true;
+    safetyError.blockReason = blockReason;
+    safetyError.safetyRatings = safetyRatings;
+    safetyError.rawResponse = responseData;
+    throw safetyError;
+  }
+
+  // 2. candidate 레벨의 finishReason 안전 필터 차단 검사
+  const candidate = responseData?.candidates?.[0];
+  const finishReason = candidate?.finishReason;
+  if (finishReason === 'SAFETY') {
+    const safetyRatings = candidate?.safetyRatings || [];
+    const ratingSummary = safetyRatings
+      .map((r) => `${r.category}: ${r.probability}`)
+      .join(', ');
+
+    console.warn('[Gemini API Safety Block] 이미지 분석 결과가 안전 정책(선정성/폭력성 등)으로 차단되었습니다:', {
+      finishReason,
+      safetyRatings,
+      responseData,
+    });
+
+    const safetyError = new Error(
+      `Gemini AI 안전 필터 차단 (Candidate Block): finishReason=${finishReason} [${ratingSummary || '성인/선정성 필터'}]`
+    );
+    safetyError.isSafetyBlock = true;
+    safetyError.finishReason = finishReason;
+    safetyError.safetyRatings = safetyRatings;
+    safetyError.rawResponse = responseData;
+    throw safetyError;
+  }
 
   try {
     const rawContentText = responseData?.candidates?.[0]?.content?.parts?.[0]?.text;

@@ -24,6 +24,7 @@ export default function ComparisonViewer({
   zipDownloadUrl = null,
   zipFileName = 'translated_comics.zip',
   failedCount = 0,
+  safetyBlockedCount = 0,
 }) {
   const isMultiPage = pages && pages.length > 0;
   const [pageIndex, setPageIndex] = useState(0);
@@ -38,6 +39,7 @@ export default function ComparisonViewer({
   const activeTranslatedUrl = isMultiPage ? currentPage?.translatedUrl : translatedUrl;
   const activePageName = isMultiPage ? currentPage?.name : 'translated.jpg';
   const isCurrentPageFailed = isMultiPage && currentPage?.isFailed;
+  const isCurrentPageSafetyBlocked = isMultiPage && currentPage?.isSafetyBlocked;
 
   // 슬라이더 드래그 핸들러
   const handleSliderMove = (clientX) => {
@@ -137,6 +139,13 @@ export default function ComparisonViewer({
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
               <span>{failedCount}개 페이지 실패 (원본 유지)</span>
+            </span>
+          )}
+
+          {safetyBlockedCount > 0 && (
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+              <span>{safetyBlockedCount}개 페이지 안전 필터 감지 (로컬 대체 식자 적용)</span>
             </span>
           )}
         </div>
@@ -258,6 +267,12 @@ export default function ComparisonViewer({
                 번역 실패 (원본 보존)
               </span>
             )}
+            {isCurrentPageSafetyBlocked && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                <AlertTriangle className="w-3 h-3 mr-1 text-rose-400" />
+                안전 필터 감지 (로컬 대체 식자 적용)
+              </span>
+            )}
           </div>
 
           {/* Quick Page Selector */}
@@ -271,13 +286,24 @@ export default function ComparisonViewer({
                     ? 'bg-brand-600 text-white shadow-md'
                     : p.isFailed
                     ? 'bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-800/40'
+                    : p.isSafetyBlocked
+                    ? 'bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40'
                     : 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white'
                 }`}
-                title={p.isFailed ? `${idx + 1}페이지: 번역 실패 (원본 유지)` : `${idx + 1}페이지`}
+                title={
+                  p.isFailed
+                    ? `${idx + 1}페이지: 번역 실패 (원본 유지)`
+                    : p.isSafetyBlocked
+                    ? `${idx + 1}페이지: 안전 필터 감지 (로컬 대체 식자)`
+                    : `${idx + 1}페이지`
+                }
               >
                 {idx + 1}
                 {p.isFailed && (
                   <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950" />
+                )}
+                {p.isSafetyBlocked && !p.isFailed && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-400 ring-2 ring-slate-950" />
                 )}
               </button>
             ))}
