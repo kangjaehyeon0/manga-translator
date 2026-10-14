@@ -193,12 +193,12 @@ export default function ApiKeyModal({
               )}
             </div>
 
-            {/* Server key notice */}
-            {serverHasKey && !freeModeActive && (
-              <div className="mb-2.5 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-start space-x-2">
-                <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-400" />
+            {/* Client Direct API notice */}
+            {!freeModeActive && (
+              <div className="mb-2.5 p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 flex items-start space-x-2">
+                <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5 text-indigo-400" />
                 <p className="leading-snug">
-                  서버 .env에 <code className="font-mono bg-emerald-950/60 px-1 py-0.5 rounded">GEMINI_API_KEY</code>가 등록되어 있습니다. 비워두면 서버 키가 자동 사용됩니다.
+                  중간 서버를 거치지 않고 사용자 브라우저에서 Google 공식 엔드포인트로 100% 직접 안전하게 통신합니다.
                 </p>
               </div>
             )}
@@ -211,8 +211,6 @@ export default function ApiKeyModal({
               placeholder={
                 freeModeActive
                   ? '무료 모드가 활성화되어 API 키가 필요하지 않습니다.'
-                  : serverHasKey
-                  ? '서버 기본 키 사용 중 (원하는 경우 개별 키 입력)'
                   : 'AIzaSy...'
               }
               className={`w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border text-sm text-white placeholder-slate-500 font-mono transition focus:outline-none ${
@@ -222,7 +220,7 @@ export default function ApiKeyModal({
               }`}
             />
             <p className="mt-1.5 text-[11px] text-slate-400">
-              * 입력한 키는 브라우저 로컬 스토리지에만 보관되며 안전하게 보호됩니다.
+              * 입력한 키는 브라우저 로컬 스토리지에만 보관되며 제3자 서버로 전송되지 않습니다.
             </p>
           </div>
 

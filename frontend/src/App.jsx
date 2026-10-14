@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import JSZip from 'jszip';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
@@ -6,6 +6,8 @@ import TranslationProgress from './components/TranslationProgress';
 import ComparisonViewer from './components/ComparisonViewer';
 import ApiKeyModal, { GEMINI_MODELS } from './components/ApiKeyModal';
 import { AlertTriangle, Sparkles, BookOpen, Cpu, ShieldCheck, Zap } from 'lucide-react';
+import { detectAndTranslateWithGemini } from './services/geminiService';
+import { typesetComicImage, generateFreeModeDetections } from './services/canvasTypesetter';
 
 export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -14,6 +16,10 @@ export default function App() {
   const [dialogueCount, setDialogueCount] = useState(0);
   const [isTranslating, setIsTranslating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // 진행 상태 세부 정보
+  const [currentProgressPage, setCurrentProgressPage] = useState(0);
+  const [progressText, setProgressText] = useState('');
 
   // ZIP / 멀티페이지 관련 상태
   const [zipDetails, setZipDetails] = useState(null); // { pageCount, originalPages: [{ name, url, blob }] }
@@ -38,10 +44,7 @@ export default function App() {
     createdUrlsRef.current = [];
   };
 
-  // API 기본 주소
-  const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-
-  // API Key 및 모델, 무료 모드 State
+  // API Key 및 모델, 무료 모드 State (백엔드 통신 없음 - 100% 브라우저 로컬 스토리지 보관)
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem('GEMINI_MODEL') || 'gemini-1.5-flash'
@@ -49,30 +52,7 @@ export default function App() {
   const [isFreeMode, setIsFreeMode] = useState(
     () => localStorage.getItem('MANGA_FREE_MODE') === 'true'
   );
-  const [serverHasKey, setServerHasKey] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
-
-  // 서버 상태 및 키 설정 여부 확인
-  useEffect(() => {
-    fetch(`${API_BASE}/api/health`)
-      .then(async (res) => {
-        if (!res.ok) return null;
-        try {
-          const text = await res.text();
-          return JSON.parse(text);
-        } catch (_) {
-          return null;
-        }
-      })
-      .then((data) => {
-        if (data && data.has_api_key) {
-          setServerHasKey(true);
-        }
-      })
-      .catch((err) => {
-        console.warn('Backend health check warning:', err);
-      });
-  }, [API_BASE]);
 
   const handleSaveApiKey = (key) => {
     setApiKey(key);
@@ -150,7 +130,7 @@ export default function App() {
         // 첫 번째 페이지를 미리보기로 설정
         setPreviewUrl(originalPages[0].url);
       } catch (err) {
-        console.error('ZIP 파싱 오류:', err);
+        console.error('[Manga Translator] ZIP 파싱 오류 상세:', err);
         setErrorMsg('ZIP 파일 형식을 읽는 중 오류가 발생했습니다. 정상적인 압축 파일인지 확인해주세요.');
       }
     } else {
@@ -171,86 +151,8 @@ export default function App() {
     setFailedCount(0);
     setErrorMsg('');
     setDialogueCount(0);
-  };
-
-  // 클라이언트 로컬 무료 모드 합성기 (백엔드 오프라인 시에도 번역 100% 보장하는 폴백)
-  const renderClientFreeModeCanvas = async (imageSource) => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        const ctx = canvas.getContext('2d');
-
-        // 원본 이미지 그리기
-        ctx.drawImage(img, 0, 0);
-
-        // 무료 모드용 스마트 식자 오버레이 대사
-        const dialogues = [
-          {
-            box: [0.1 * canvas.height, 0.15 * canvas.width, 0.22 * canvas.height, 0.42 * canvas.width],
-            text: '이게 진짜인가?! 이 엄청난 힘은...',
-          },
-          {
-            box: [0.12 * canvas.height, 0.6 * canvas.width, 0.25 * canvas.height, 0.85 * canvas.width],
-            text: '잠깐! 방심하면 안 돼!',
-          },
-          {
-            box: [0.75 * canvas.height, 0.25 * canvas.width, 0.9 * canvas.height, 0.75 * canvas.width],
-            text: 'MangaTrans: 무료 모드로 성공적으로 번역되었습니다!',
-          },
-        ];
-
-        dialogues.forEach(({ box, text }) => {
-          const [ymin, xmin, ymax, xmax] = box;
-          const w = xmax - xmin;
-          const h = ymax - ymin;
-
-          // 말풍선 배경 하얗게 칠하기
-          ctx.save();
-          ctx.fillStyle = '#ffffff';
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = Math.max(2, Math.floor(canvas.width / 400));
-
-          // 둥근 사각형 또는 타원
-          ctx.beginPath();
-          ctx.ellipse(xmin + w / 2, ymin + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-
-          // 텍스트 식자
-          ctx.fillStyle = '#111827';
-          const fontSize = Math.max(14, Math.min(26, Math.floor(w / 12)));
-          ctx.font = `bold ${fontSize}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-
-          // 긴 텍스트 줄바꿈
-          if (text.length > 15) {
-            const mid = Math.ceil(text.length / 2);
-            ctx.fillText(text.slice(0, mid), xmin + w / 2, ymin + h / 2 - fontSize * 0.6);
-            ctx.fillText(text.slice(mid), xmin + w / 2, ymin + h / 2 + fontSize * 0.6);
-          } else {
-            ctx.fillText(text, xmin + w / 2, ymin + h / 2);
-          }
-          ctx.restore();
-        });
-
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Canvas to Blob conversion failed'));
-        }, 'image/jpeg', 0.95);
-      };
-      img.onerror = (e) => reject(e);
-
-      if (typeof imageSource === 'string') {
-        img.src = imageSource;
-      } else {
-        img.src = URL.createObjectURL(imageSource);
-      }
-    });
+    setCurrentProgressPage(0);
+    setProgressText('');
   };
 
   // 샘플 만화 이미지 생성
@@ -300,14 +202,14 @@ export default function App() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText("I can't believe this!", 230, 145);
-    ctx.fillText("The power is overwhelming!", 230, 180);
+    ctx.fillText('The power is overwhelming!', 230, 180);
 
     ctx.beginPath();
     ctx.ellipse(680, 200, 140, 80, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillText("Wait...", 680, 185);
-    ctx.fillText("Is this real?!", 680, 220);
+    ctx.fillText('Wait...', 680, 185);
+    ctx.fillText('Is this real?!', 680, 220);
 
     // 패널 2 (하단)
     ctx.strokeStyle = '#111827';
@@ -331,7 +233,7 @@ export default function App() {
     ctx.fillStyle = '#000000';
     ctx.font = 'bold 28px sans-serif';
     ctx.fillText("Let's finish this now!", 450, 955);
-    ctx.fillText("Manga Translation Engine!", 450, 1005);
+    ctx.fillText('Manga Translation Engine!', 450, 1005);
 
     canvas.toBlob((blob) => {
       if (blob) {
@@ -341,175 +243,157 @@ export default function App() {
     }, 'image/jpeg', 0.95);
   };
 
+  // 100% 브라우저(클라이언트) 내부 번역 및 식자 합성 파이프라인
   const handleStartTranslate = async () => {
     if (!selectedFile) return;
 
-    // 무료 모드가 아닌 경우에만 API 키 유효성 확인
-    if (!isFreeMode && !apiKey && !serverHasKey) {
+    // 무료 모드가 아닌 경우 API 키 입력 필수 확인
+    if (!isFreeMode && !apiKey.trim()) {
       setIsKeyModalOpen(true);
-      setErrorMsg('번역을 시작하려면 Gemini API 키가 필요하거나, 무료 모드를 활성화해주세요.');
+      setErrorMsg('번역을 시작하려면 Gemini API 키를 입력하거나, 무료 모드를 켜주세요.');
       return;
     }
 
     setIsTranslating(true);
     setErrorMsg('');
+    setCurrentProgressPage(0);
+    setProgressText('번역 작업을 시작합니다...');
+
+    const isZip = Boolean(zipDetails);
 
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
+      if (isZip) {
+        // ========== ZIP 다중 페이지 브라우저 클라이언트 일괄 처리 ==========
+        const originalPages = zipDetails.originalPages || [];
+        const outZip = new JSZip();
+        let totalDialogues = 0;
+        let failedNum = 0;
+        const matchedPages = [];
 
-      const headers = {};
-      // 선택된 Gemini 모델 파라미터 전달
-      headers['X-Gemini-Model'] = selectedModel;
-      // 무료 모드 플래그 전달
-      headers['X-Free-Mode'] = isFreeMode ? 'true' : 'false';
+        for (let i = 0; i < originalPages.length; i++) {
+          const page = originalPages[i];
+          setCurrentProgressPage(i + 1);
+          setProgressText(`${i + 1} / ${originalPages.length} 페이지 번역 및 식자 합성 중...`);
 
-      if (apiKey && !isFreeMode) {
-        headers['X-Gemini-Api-Key'] = apiKey;
-      }
-
-      let response;
-      let backendFailed = false;
-
-      try {
-        response = await fetch(`${API_BASE}/api/translate`, {
-          method: 'POST',
-          headers: headers,
-          body: formData,
-        });
-      } catch (networkErr) {
-        console.warn('Network request failed:', networkErr);
-        backendFailed = true;
-      }
-
-      // 백엔드가 오프라인이거나 연결 실패 시, 무료 모드이면 클라이언트 로컬 폴백으로 무중단 완료
-      if (backendFailed || !response) {
-        if (isFreeMode) {
-          console.info('Backend unreachable, executing Client Local Free Mode fallback.');
-          const fallbackBlob = await renderClientFreeModeCanvas(selectedFile);
-          const objectUrl = registerUrl(URL.createObjectURL(fallbackBlob));
-          setDialogueCount(3);
-          setTranslatedUrl(objectUrl);
-          return;
-        } else {
-          throw new Error('백엔드 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
-        }
-      }
-
-      // 안전한 스트림 처리: response.text()를 1회만 읽어 'body stream already read' 에러 원천 차단
-      if (!response.ok) {
-        let errText = '번역 요청에 실패했습니다.';
-        try {
-          const rawText = await response.text();
-          try {
-            const errData = JSON.parse(rawText);
-            errText = errData.detail || errData.message || rawText;
-          } catch (_) {
-            errText = rawText || `서버 오류 (HTTP ${response.status})`;
-          }
-        } catch (readErr) {
-          errText = `응답 처리 중 오류가 발생했습니다 (HTTP ${response.status}: ${response.statusText})`;
-        }
-
-        // 무료 모드일 때 서버 에러가 발생해도 중단되지 않도록 클라이언트 로컬 폴백 가동
-        if (isFreeMode) {
-          console.warn('Backend returned error during free mode, falling back to local canvas:', errText);
-          const fallbackBlob = await renderClientFreeModeCanvas(selectedFile);
-          const objectUrl = registerUrl(URL.createObjectURL(fallbackBlob));
-          setDialogueCount(3);
-          setTranslatedUrl(objectUrl);
-          return;
-        }
-
-        throw new Error(errText);
-      }
-
-      // 응답 헤더 확인
-      const countHeader = response.headers.get('X-Dialogue-Count');
-      if (countHeader) {
-        setDialogueCount(parseInt(countHeader, 10) || 0);
-      }
-
-      const failedHeader = response.headers.get('X-Failed-Count');
-      const failedNum = failedHeader ? parseInt(failedHeader, 10) || 0 : 0;
-      setFailedCount(failedNum);
-
-      const isZipResponse =
-        response.headers.get('X-Is-Zip') === 'true' ||
-        selectedFile.name.toLowerCase().endsWith('.zip') ||
-        Boolean(zipDetails);
-
-      const blob = await response.blob();
-
-      if (isZipResponse) {
-        // ZIP 응답 언팩 처리
-        const downloadZipUrl = registerUrl(URL.createObjectURL(blob));
-        setZipDownloadUrl(downloadZipUrl);
-
-        try {
-          const outZip = await JSZip.loadAsync(blob);
-          const validExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
-          const outEntries = [];
-
-          outZip.forEach((relativePath, entry) => {
-            if (!entry.dir && !relativePath.startsWith('__MACOSX') && !relativePath.split('/').pop().startsWith('.')) {
-              const ext = relativePath.slice(relativePath.lastIndexOf('.')).toLowerCase();
-              if (validExtensions.includes(ext)) {
-                outEntries.push(entry);
-              }
-            }
-          });
-
-          // 파일명 자연스러운 순서로 정렬
-          outEntries.sort((a, b) =>
-            a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-          );
-
-          const matchedPages = [];
-          const origList = zipDetails?.originalPages || [];
-
-          for (let i = 0; i < outEntries.length; i++) {
-            const outEntry = outEntries[i];
-            const cleanName = outEntry.name.split('/').pop();
-            const isFailed = cleanName.startsWith('failed_') || cleanName.startsWith('error_');
-            const outBlob = await outEntry.async('blob');
-            const transUrl = registerUrl(URL.createObjectURL(outBlob));
-            const origItem = origList[i] || origList[0];
+          if (isFreeMode) {
+            // 무료 모드: 로컬 캔버스 합성 파이프라인
+            const detections = generateFreeModeDetections();
+            const translatedBlob = await typesetComicImage(page.blob, detections);
+            outZip.file(page.name, translatedBlob);
+            const pageTranslatedUrl = registerUrl(URL.createObjectURL(translatedBlob));
+            totalDialogues += detections.length;
 
             matchedPages.push({
-              name: cleanName.replace(/^(failed_|error_)/, ''),
-              originalUrl: origItem?.url || transUrl,
-              translatedUrl: transUrl,
-              isFailed,
+              name: page.name,
+              originalUrl: page.url,
+              translatedUrl: pageTranslatedUrl,
+              isFailed: false,
             });
-          }
+          } else {
+            // Gemini 모드: 공식 API 직접 호출 및 Canvas 식자
+            try {
+              const detections = await detectAndTranslateWithGemini({
+                apiKey,
+                model: selectedModel,
+                imageBlob: page.blob,
+              });
 
-          setPages(matchedPages);
-          if (matchedPages.length > 0) {
-            setTranslatedUrl(matchedPages[0].translatedUrl);
+              const translatedBlob = await typesetComicImage(page.blob, detections);
+              outZip.file(page.name, translatedBlob);
+              const pageTranslatedUrl = registerUrl(URL.createObjectURL(translatedBlob));
+              totalDialogues += detections.length;
+
+              matchedPages.push({
+                name: page.name,
+                originalUrl: page.url,
+                translatedUrl: pageTranslatedUrl,
+                isFailed: false,
+              });
+            } catch (pageErr) {
+              console.error(`[Manga Translator] '${page.name}' 페이지 처리 중 오류 발생:`, pageErr);
+              failedNum++;
+              outZip.file(`failed_${page.name}`, page.blob);
+
+              matchedPages.push({
+                name: page.name,
+                originalUrl: page.url,
+                translatedUrl: page.url,
+                isFailed: true,
+              });
+            }
           }
-        } catch (zipErr) {
-          console.error('번역된 ZIP 파일 언팩 실패:', zipErr);
-          setTranslatedUrl(downloadZipUrl);
+        }
+
+        setProgressText('최종 번역 결과 ZIP 아카이브를 패키징하는 중...');
+        const outZipBlob = await outZip.generateAsync({ type: 'blob' });
+        const downloadZipUrl = registerUrl(URL.createObjectURL(outZipBlob));
+
+        setZipDownloadUrl(downloadZipUrl);
+        setPages(matchedPages);
+        setDialogueCount(totalDialogues);
+        setFailedCount(failedNum);
+
+        if (matchedPages.length > 0) {
+          setTranslatedUrl(matchedPages[0].translatedUrl);
         }
       } else {
-        // 단일 이미지
-        const objectUrl = registerUrl(URL.createObjectURL(blob));
+        // ========== 단일 이미지 브라우저 클라이언트 처리 ==========
+        setProgressText(
+          isFreeMode
+            ? '무료 모드로 로컬 Canvas 식자 합성 중...'
+            : `${selectedModel}로 만화 대사 및 말풍선 감지 중...`
+        );
+
+        let detections;
+        if (isFreeMode) {
+          // 무료 모드: 가상 말풍선 및 대사 생성
+          detections = generateFreeModeDetections();
+        } else {
+          // Gemini 모드: Google 공식 엔드포인트 직접 호출
+          detections = await detectAndTranslateWithGemini({
+            apiKey,
+            model: selectedModel,
+            imageBlob: selectedFile,
+          });
+        }
+
+        setProgressText('말풍선 배경 마스킹 및 한글 폰트 자동 식자 합성 중...');
+        const translatedBlob = await typesetComicImage(selectedFile, detections);
+        const objectUrl = registerUrl(URL.createObjectURL(translatedBlob));
+
+        setDialogueCount(detections.length);
         setTranslatedUrl(objectUrl);
       }
     } catch (err) {
-      console.error('Translation error:', err);
-      setErrorMsg(err.message || '번역 처리 중 오류가 발생했습니다.');
+      // 3. 처리 실패 시 개발자 콘솔(console.error)에 실제 구체적 에러 객체 출력
+      console.error('[Manga Translator] 번역 처리 중 상세 오류 객체:', {
+        message: err.message,
+        status: err.status,
+        statusText: err.statusText,
+        details: err.details,
+        error: err,
+        stack: err.stack,
+      });
+
+      let displayMessage = err.message || '번역 처리 중 오류가 발생했습니다.';
+      if (err.status === 403 || err.status === 400) {
+        displayMessage = `${displayMessage} (Gemini API 키가 올바른지 확인해주세요.)`;
+      } else if (err.status === 429) {
+        displayMessage = 'Gemini API 호출 한도(Quota)를 초과했습니다. 잠시 후 다시 시도하거나 무료 모드를 사용해주세요.';
+      }
+
+      setErrorMsg(displayMessage);
     } finally {
       setIsTranslating(false);
+      setProgressText('');
     }
   };
 
-  const isZip = selectedFile && (
-    selectedFile.name.toLowerCase().endsWith('.zip') ||
-    selectedFile.type?.includes('zip') ||
-    Boolean(zipDetails)
-  );
+  const isZip =
+    selectedFile &&
+    (selectedFile.name.toLowerCase().endsWith('.zip') ||
+      selectedFile.type?.includes('zip') ||
+      Boolean(zipDetails));
 
   const currentModelObj = GEMINI_MODELS.find((m) => m.id === selectedModel) || GEMINI_MODELS[0];
 
@@ -517,7 +401,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col bg-radial-gradient">
       {/* Navigation Header */}
       <Header
-        hasApiKey={Boolean(apiKey || serverHasKey)}
+        hasApiKey={Boolean(apiKey)}
         onOpenKeyModal={() => setIsKeyModalOpen(true)}
         selectedModel={selectedModel}
         isFreeMode={isFreeMode}
@@ -530,27 +414,29 @@ export default function App() {
           <div className="text-center max-w-3xl mx-auto mb-10 space-y-4">
             <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Next-Gen Comic Typesetting with {currentModelObj.name}</span>
+              <span>Next-Gen Comic Typesetting with {isFreeMode ? '무료 로컬 엔진' : currentModelObj.name}</span>
             </div>
             <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
               만화 대사 인식부터 번역과 식자까지{' '}
               <span className="bg-gradient-to-r from-brand-400 via-indigo-400 to-accent-400 bg-clip-text text-transparent">
-                원클릭 완성
+                100% 브라우저 완성
               </span>
             </h2>
             <p className="text-sm sm:text-base text-slate-400 max-w-2xl mx-auto leading-relaxed">
-              Google Gemini 비전 AI가 말풍선 영역(0~1000)을 정밀 감지하고,
-              원문 대사를 자연스러운 한국어로 번역한 후 나눔고딕으로 완벽하게 합성합니다.
-              <br />
               {isFreeMode ? (
                 <span className="text-emerald-400 font-medium">
-                  ⚡ 현재 무료 모드가 켜져 있어 API 키 없이도 누구나 즉시 체험할 수 있습니다.
+                  ⚡ 무료 모드 활성화 중: 백엔드 서버 없이 브라우저 HTML5 Canvas만으로 즉시 번역 & 식자 합성 체험이 가능합니다.
                 </span>
               ) : (
-                <strong className="text-brand-300">
-                  ZIP 대용량 압축 파일 및 이미지 다중 선택 일괄 번역 지원!
-                </strong>
+                <span>
+                  브라우저에서 Google Gemini API 공식 엔드포인트로 직접 연결하여 말풍선 영역(0~1000)을 정밀 감지하고,
+                  HTML5 Canvas에서 원문 대사를 나눔고딕으로 완벽하게 식자 합성합니다.
+                </span>
               )}
+              <br />
+              <strong className="text-brand-300">
+                서버 설치 불필요 • ZIP 대용량 압축 파일 및 이미지 일괄 번역 지원!
+              </strong>
             </p>
           </div>
         )}
@@ -562,6 +448,9 @@ export default function App() {
             <div className="flex-1">
               <p className="font-semibold text-rose-200">처리 오류</p>
               <p className="text-xs text-rose-300/90 mt-0.5 leading-relaxed">{errorMsg}</p>
+              <p className="text-[11px] text-slate-400 mt-1">
+                * 상세한 네트워크 및 API 오류 내용은 브라우저 개발자 도구 콘솔(F12)을 확인해주세요.
+              </p>
             </div>
             <div className="flex space-x-2">
               <button
@@ -584,7 +473,16 @@ export default function App() {
         )}
 
         {/* State 1: Translation In Progress */}
-        {isTranslating && <TranslationProgress isZip={isZip} pageCount={zipDetails?.pageCount} />}
+        {isTranslating && (
+          <TranslationProgress
+            isZip={isZip}
+            pageCount={zipDetails?.pageCount}
+            currentPage={currentProgressPage}
+            progressText={progressText}
+            selectedModel={selectedModel}
+            isFreeMode={isFreeMode}
+          />
+        )}
 
         {/* State 2: Result Comparison Viewer */}
         {!isTranslating && translatedUrl && (
@@ -600,68 +498,28 @@ export default function App() {
           />
         )}
 
-        {/* State 3: File Upload Area */}
+        {/* State 3: Upload & Config Interface */}
         {!isTranslating && !translatedUrl && (
-          <ImageUploader
-            selectedFile={selectedFile}
-            previewUrl={previewUrl}
-            zipDetails={zipDetails}
-            onSelectFile={handleSelectFile}
-            onClearFile={handleClearFile}
-            onStartTranslate={handleStartTranslate}
-            isTranslating={isTranslating}
-            onLoadSample={handleLoadSample}
-          />
-        )}
-
-        {/* Features Info Cards (하단 안내) */}
-        {!isTranslating && !translatedUrl && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl mx-auto mt-16 pt-10 border-t border-slate-800/80">
-            <div className="glass-card p-5 rounded-2xl space-y-2">
-              <div className="w-9 h-9 rounded-xl bg-brand-500/10 text-brand-400 flex items-center justify-center">
-                <Cpu className="w-5 h-5" />
-              </div>
-              <h4 className="text-sm font-bold text-white">{currentModelObj.name}</h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                정규화 좌표([ymin, xmin, ymax, xmax]) 기반 2D 바운딩 박스를 통해 말풍선 위치를 오차 없이 감지합니다.
-              </p>
-            </div>
-
-            <div className="glass-card p-5 rounded-2xl space-y-2">
-              <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-                <BookOpen className="w-5 h-5" />
-              </div>
-              <h4 className="text-sm font-bold text-white">ZIP 일괄 번역 & 다중 선택</h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                만화 여러 권 또는 수십 장의 페이지를 ZIP으로 압축하거나 다중 선택하여 한 번에 번역하고 일괄 다운로드합니다.
-              </p>
-            </div>
-
-            <div className="glass-card p-5 rounded-2xl space-y-2">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-                <Zap className="w-5 h-5" />
-              </div>
-              <h4 className="text-sm font-bold text-white">무료 모드 & 스마트 식자</h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                API 키가 없어도 누구나 테스트 가능한 무료 모드와 말풍선 마스킹 & 나눔고딕 한글 식자를 지원합니다.
-              </p>
-            </div>
+          <div className="space-y-6">
+            <ImageUploader
+              selectedFile={selectedFile}
+              previewUrl={previewUrl}
+              onSelectFile={handleSelectFile}
+              onClearFile={handleClearFile}
+              onStartTranslate={handleStartTranslate}
+              onLoadSample={handleLoadSample}
+              zipPageCount={zipDetails?.pageCount}
+            />
           </div>
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="w-full border-t border-slate-800/60 py-6 text-center text-xs text-slate-400">
-        <p>© 2026 MangaTrans • Powered by Google Gemini & FastAPI</p>
-      </footer>
-
-      {/* API Key & Model Settings Modal */}
+      {/* API Key & Model Configuration Modal */}
       <ApiKeyModal
         isOpen={isKeyModalOpen}
         onClose={() => setIsKeyModalOpen(false)}
         currentKey={apiKey}
         onSaveKey={handleSaveApiKey}
-        serverHasKey={serverHasKey}
         currentModel={selectedModel}
         onSaveModel={handleSaveModel}
         isFreeMode={isFreeMode}

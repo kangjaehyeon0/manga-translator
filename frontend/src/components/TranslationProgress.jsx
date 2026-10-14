@@ -1,29 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, Sparkles, Languages, Type, CheckCircle2, Archive } from 'lucide-react';
 
-export default function TranslationProgress({ isZip = false, pageCount = 0 }) {
+export default function TranslationProgress({
+  isZip = false,
+  pageCount = 0,
+  currentPage = 0,
+  progressText = '',
+  selectedModel = 'gemini-1.5-flash',
+  isFreeMode = false,
+}) {
   const [currentStep, setCurrentStep] = useState(0);
+
+  const modelLabel = isFreeMode ? '무료 로컬 엔진' : selectedModel;
 
   const steps = isZip
     ? [
-        { icon: Archive, label: `ZIP 압축 해제 및 ${pageCount > 0 ? `${pageCount}개 ` : ''}만화 이미지 분석 중...` },
-        { icon: Languages, label: 'Gemini 3.8 Flash로 페이지별 대사 인식 및 번역 중...' },
-        { icon: Type, label: '한글 나눔고딕 식자 합성 및 최종 ZIP 아카이브 생성 중...' },
+        { icon: Archive, label: `ZIP 압축 해제 및 ${pageCount > 0 ? `${pageCount}개 ` : ''}만화 이미지 분석` },
+        { icon: Languages, label: `${modelLabel} 대사 인식 및 한국어 번역` },
+        { icon: Type, label: 'HTML5 Canvas 한글 나눔고딕 식자 합성 및 ZIP 생성' },
       ]
     : [
-        { icon: Sparkles, label: 'Gemini 3.8 Flash 비전 모델에 이미지 전달 중...' },
-        { icon: Languages, label: '말풍선 좌표 감지 및 한국어 대사 번역 중...' },
-        { icon: Type, label: '말풍선 배경 마스킹 & 한글 폰트 자동 식자 합성 중...' },
+        { icon: Sparkles, label: `${modelLabel}에 이미지 전달 및 말풍선 감지` },
+        { icon: Languages, label: '말풍선 좌표 정밀 분석 및 감정선 번역' },
+        { icon: Type, label: 'HTML5 Canvas 배경 마스킹 & 한글 자동 식자 합성' },
       ];
 
   useEffect(() => {
-    const timer1 = setTimeout(() => setCurrentStep(1), 2200);
-    const timer2 = setTimeout(() => setCurrentStep(2), 5200);
-    return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-    };
-  }, []);
+    if (currentPage > 0 && pageCount > 0) {
+      if (currentPage >= pageCount) {
+        setCurrentStep(2);
+      } else if (currentPage > 1) {
+        setCurrentStep(1);
+      }
+    } else {
+      const timer1 = setTimeout(() => setCurrentStep(1), 1500);
+      const timer2 = setTimeout(() => setCurrentStep(2), 3500);
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
+    }
+  }, [currentPage, pageCount]);
 
   return (
     <div className="w-full max-w-xl mx-auto my-12 p-8 glass-panel rounded-3xl text-center space-y-6 shadow-2xl shadow-brand-500/10">
@@ -43,10 +60,28 @@ export default function TranslationProgress({ isZip = false, pageCount = 0 }) {
           {isZip ? 'ZIP 일괄 만화 번역 & 식자 합성 진행 중' : '만화 번역 및 식자 합성 진행 중'}
         </h3>
         <p className="text-xs sm:text-sm text-slate-400">
-          {isZip
-            ? `총 ${pageCount > 0 ? `${pageCount}장의 ` : ''}페이지를 순차 분석하고 있습니다. 페이지 수에 따라 잠시 기다려주세요.`
-            : 'AI가 말풍선을 정밀 분석하고 자연스러운 한국어로 대사를 채워넣고 있습니다.'}
+          {progressText ||
+            (isZip
+              ? `총 ${pageCount > 0 ? `${pageCount}장의 ` : ''}페이지를 순차 분석하고 있습니다.`
+              : '브라우저에서 직접 AI 대사 분석 및 고품질 한글 식자를 합성하고 있습니다.')}
         </p>
+
+        {isZip && pageCount > 0 && (
+          <div className="pt-2">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>진행률</span>
+              <span className="font-semibold text-brand-300">
+                {currentPage} / {pageCount} 페이지 ({Math.round(((currentPage || 1) / pageCount) * 100)}%)
+              </span>
+            </div>
+            <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-brand-500 to-accent-500 h-2 transition-all duration-300 rounded-full"
+                style={{ width: `${Math.max(5, Math.min(100, Math.round(((currentPage || 1) / pageCount) * 100)))}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Progress Steps */}
