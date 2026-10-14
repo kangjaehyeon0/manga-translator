@@ -252,7 +252,7 @@ export function generateSafetyBlockDetections() {
  * @param {Array<{box_2d: number[], translated_text: string}>} detections - 말풍선 및 번역 대사 목록
  * @returns {Promise<Blob>} 합성 완료된 이미지 Blob
  */
-export async function typesetComicImage(imageSource, detections = []) {
+export async function typesetComicImage(imageSource, detections = [], fileName = '') {
   const img = await loadImage(imageSource);
   const width = img.naturalWidth || img.width;
   const height = img.naturalHeight || img.height;
@@ -345,17 +345,30 @@ export async function typesetComicImage(imageSource, detections = []) {
     ctx.restore();
   }
 
-  // 3. Blob으로 변환
+  // 3. Blob으로 변환 (WebP/PNG/JPEG 원본 형식 유지)
+  let outputMime = 'image/jpeg';
+  const lowerName = (fileName || '').toLowerCase();
+  if (lowerName.endsWith('.webp')) outputMime = 'image/webp';
+  else if (lowerName.endsWith('.png')) outputMime = 'image/png';
+
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (blob) {
           resolve(blob);
         } else {
-          reject(new Error('Canvas 이미지를 Blob으로 변환하지 못했습니다.'));
+          // 브라우저가 특정 MIME을 지원하지 않을 때 JPEG로 폴백
+          canvas.toBlob(
+            (fallbackBlob) => {
+              if (fallbackBlob) resolve(fallbackBlob);
+              else reject(new Error('Canvas 이미지를 Blob으로 변환하지 못했습니다.'));
+            },
+            'image/jpeg',
+            0.95
+          );
         }
       },
-      'image/jpeg',
+      outputMime,
       0.95
     );
   });

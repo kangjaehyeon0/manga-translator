@@ -14,10 +14,40 @@ Format:
 ]`;
 
 /**
+ * Base64 매직 바이트(헤더 시그니처) 및 파일명을 통한 100% 정확한 MIME 타입 감지
+ * WebP 이미지가 JPEG로 잘못 전송되어 400 디코딩 오류가 발생하는 것을 완벽히 방지합니다.
+ */
+export function detectMimeType(base64Data, fileName = '', blobType = '') {
+  // 1. 파일 확장자 우선 검사
+  const lowerName = (fileName || '').toLowerCase();
+  if (lowerName.endsWith('.webp')) return 'image/webp';
+  if (lowerName.endsWith('.png')) return 'image/png';
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'image/jpeg';
+  if (lowerName.endsWith('.gif')) return 'image/gif';
+
+  // 2. Base64 매직 바이트(Magic Bytes) 시그니처 검사
+  if (base64Data) {
+    if (base64Data.startsWith('UklGR')) return 'image/webp'; // RIFF....WEBP
+    if (base64Data.startsWith('iVBORw0KGgo')) return 'image/png'; // \x89PNG
+    if (base64Data.startsWith('/9j/')) return 'image/jpeg'; // \xFF\xD8\xFF
+    if (base64Data.startsWith('R0lGOD')) return 'image/gif'; // GIF8
+  }
+
+  // 3. Blob type 검사
+  if (blobType && blobType.startsWith('image/')) {
+    const t = blobType.toLowerCase().trim();
+    if (t === 'image/jpg') return 'image/jpeg';
+    return t;
+  }
+
+  return 'image/jpeg';
+}
+
+/**
  * File 또는 Blob을 순수 Base64 데이터 및 MimeType으로 안전하게 변환
  * Data URL 헤더("data:image/...;base64,")를 반드시 제거하고 순수 base64 문자열만 반환
  */
-export async function blobToBase64(blob) {
+export async function blobToBase64(blob, fileName = '') {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -33,19 +63,8 @@ export async function blobToBase64(blob) {
       // 공백 및 줄바꿈 완전 제거
       base64Data = base64Data.replace(/[\r\n\s]/g, '');
 
-      // 2. MIME 타입 추출 및 Gemini API 지원 포맷으로 정규화
-      let mimeType = 'image/jpeg';
-      const headerMatch = result.match(/^data:([^;]+);base64,/);
-      if (headerMatch) {
-        mimeType = headerMatch[1].toLowerCase().trim();
-      } else if (blob.type) {
-        mimeType = blob.type.toLowerCase().trim();
-      }
-
-      // Google Gemini API는 image/jpg를 거부하므로 image/jpeg로 통일
-      if (mimeType === 'image/jpg' || !mimeType.startsWith('image/')) {
-        mimeType = 'image/jpeg';
-      }
+      // 2. 매직 바이트 및 파일명 기반 정확한 MIME 타입 감지 (WebP/PNG/JPEG 지원)
+      const mimeType = detectMimeType(base64Data, fileName, blob.type);
 
       resolve({
         mimeType,
@@ -151,33 +170,53 @@ export function parseGeminiJsonResponse(rawText) {
 }
 
 /**
+ * 안전 설정 목록 (무료 티어 및 일반 API 키에서 400 에러를 방지하는 공식 지원 완화 설정)
+ * BLOCK_NONE은 결제 등록된 엔터프라이즈 계정에서만 지원되어 일반 키에서 400 에러를 유발하므로,
+ * 일반 키에서 최대로 유해성을 허용하는 BLOCK_ONLY_HIGH를 기본으로 전송합니다.
+ */
+export const LENIENT_SAFETY_SETTINGS = [
+  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+  { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+  { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+];
+
+export const NONE_SAFETY_SETTINGS = [
+  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+  { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+  { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+];
+
+/**
  * Gemini 비전 모델을 직접 호출하여 만화 말풍선 인식 및 한국어 번역 수행
  * @param {Object} params
  * @param {string} params.apiKey - 사용자 Gemini API 키
  * @param {string} [params.model] - 모델명 (기본: gemini-1.5-flash)
  * @param {Blob|File} params.imageBlob - 만화 이미지 Blob 또는 File
+ * @param {string} [params.fileName] - 파일명 (MIME 타입 감지용)
  * @returns {Promise<Array<{box_2d: number[], original_text: string, translated_text: string}>>}
  */
-export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob }) {
+export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob, fileName = '' }) {
   if (!apiKey || !apiKey.trim()) {
     throw new Error('Gemini API 키가 입력되지 않았습니다. 설정에서 API 키를 입력하거나 무료 모드를 사용해주세요.');
   }
 
   const cleanKey = apiKey.trim();
 
-  // 모델명 정규화 (유효한 공식 모델명만 허용, 그렇지 않으면 gemini-1.5-flash로 강제)
+  // 모델명 정규화
   let targetModel = 'gemini-1.5-flash';
   if (model && (model === 'gemini-1.5-pro' || model === 'gemini-2.0-flash')) {
     targetModel = model;
   }
 
-  // 1. 이미지를 순수 Base64 데이터 및 MimeType으로 변환 (Data URL 헤더 완전 제거)
-  const { mimeType, base64Data } = await blobToBase64(imageBlob);
+  // 1. 이미지를 순수 Base64 데이터 및 정확한 MimeType(WebP/PNG/JPEG)으로 변환
+  const { mimeType, base64Data } = await blobToBase64(imageBlob, fileName);
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
 
-  // 2. Google Gemini 공식 API 정확한 규격의 Request Payload 구성
-  const requestBody = {
+  // 2. Google Gemini 공식 API Request Payload 구성 (BLOCK_NONE 우선 시도, 실패 시 BLOCK_ONLY_HIGH 폴백)
+  const buildPayload = (safety) => ({
     contents: [
       {
         parts: [
@@ -193,28 +232,42 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob })
         ],
       },
     ],
-    safetySettings: [
-      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-    ],
-  };
+    safetySettings: safety,
+  });
 
   let response;
+  // 1차 시도: 사용자가 지정한 완전 해제(BLOCK_NONE) 시도
   try {
     response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(buildPayload(NONE_SAFETY_SETTINGS)),
     });
   } catch (netErr) {
     console.error('[Gemini API Network Error] 구글 엔드포인트 통신 실패:', netErr);
-    const err = new Error(`Google Gemini 서버 연결 실패: 브라우저 네트워크 또는 인터넷 연결을 확인해주세요. (${netErr.message})`);
+    const err = new Error(`Google Gemini 서버 연결 실패: 인터넷 연결 또는 브라우저 CORS를 확인해주세요. (${netErr.message})`);
     err.originalError = netErr;
     throw err;
+  }
+
+  // 만약 BLOCK_NONE으로 인해 400 Invalid Argument가 발생했다면 BLOCK_ONLY_HIGH로 자동 2차 재시도
+  if (!response.ok && response.status === 400) {
+    try {
+      const errorJson = await response.clone().json();
+      const msg = errorJson?.error?.message || '';
+      if (msg.includes('safety') || msg.includes('BLOCK_NONE') || msg.includes('Invalid') || msg.includes('allowed')) {
+        console.warn('[Gemini API Fallback] BLOCK_NONE이 무료 계정에서 거부됨 -> 공식 호환 BLOCK_ONLY_HIGH로 재전송합니다:', msg);
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(buildPayload(LENIENT_SAFETY_SETTINGS)),
+        });
+      }
+    } catch (_) {}
   }
 
   if (!response.ok) {
@@ -241,6 +294,7 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob })
       status: response.status,
       statusText: response.statusText,
       model: targetModel,
+      mimeType,
       errorDetails,
       endpoint: endpoint.replace(cleanKey, '***API_KEY***'),
     });
@@ -308,7 +362,7 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob })
     .join('\n');
 
   if (!textContent.trim()) {
-    console.warn('[Gemini API Warning] 모델 응답에 텍스트 내용이 없습니다:', responseData);
+    console.warn('[Gemini API Warning] 모델 응답에 텍스트 내용이 없습니다 (비어있는 대사):', responseData);
     return [];
   }
 

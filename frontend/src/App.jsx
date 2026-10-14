@@ -291,7 +291,7 @@ export default function App() {
           if (isGuestOrFree) {
             // [무료 / 게스트 모드] 네트워크 fetch 요청을 일절 시도하지 않고 브라우저 Canvas로 즉시 합성
             const detections = generateFreeModeDetections();
-            const translatedBlob = await typesetComicImage(page.blob, detections);
+            const translatedBlob = await typesetComicImage(page.blob, detections, page.name);
             outZip.file(page.name, translatedBlob);
             const pageTranslatedUrl = registerUrl(URL.createObjectURL(translatedBlob));
             totalDialogues += detections.length;
@@ -313,6 +313,7 @@ export default function App() {
                 apiKey: apiKey.trim(),
                 model: selectedModel || 'gemini-1.5-flash',
                 imageBlob: page.blob,
+                fileName: page.name,
               });
             } catch (pageErr) {
               // 429 Too Many Requests (Rate Limit) 시 3.5초 대기 후 1회 재시도
@@ -325,6 +326,7 @@ export default function App() {
                     apiKey: apiKey.trim(),
                     model: selectedModel || 'gemini-1.5-flash',
                     imageBlob: page.blob,
+                    fileName: page.name,
                   });
                 } catch (retryErr) {
                   pageErr = retryErr;
@@ -367,7 +369,7 @@ export default function App() {
             }
 
             // Canvas 식자 합성 (정상 대사 또는 검열 차단 대체 대사)
-            const translatedBlob = await typesetComicImage(page.blob, detections);
+            const translatedBlob = await typesetComicImage(page.blob, detections, page.name);
             outZip.file(page.name, translatedBlob);
             const pageTranslatedUrl = registerUrl(URL.createObjectURL(translatedBlob));
             totalDialogues += detections.length;
@@ -424,6 +426,7 @@ export default function App() {
               apiKey: apiKey.trim(),
               model: selectedModel || 'gemini-1.5-flash',
               imageBlob: selectedFile,
+              fileName: selectedFile.name,
             });
           } catch (singleErr) {
             // 단일 이미지에서도 SAFETY 차단 시 로컬 대체 식자 적용
@@ -445,7 +448,7 @@ export default function App() {
         }
 
         setProgressText('말풍선 배경 마스킹 및 한글 폰트 자동 식자 합성 중...');
-        const translatedBlob = await typesetComicImage(selectedFile, detections);
+        const translatedBlob = await typesetComicImage(selectedFile, detections, selectedFile.name);
         const objectUrl = registerUrl(URL.createObjectURL(translatedBlob));
 
         // 단일 이미지의 경우에도 ZIP 다운로드 파일로 완성 (순수 클라이언트 JSZip)

@@ -217,10 +217,17 @@ export default function ComparisonViewer({
 
       {/* Partial Failure Warning Banner */}
       {failedCount > 0 && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center space-x-3 shadow-md">
-          <AlertTriangle className="w-5 h-5 flex-shrink-0 text-amber-400" />
-          <div className="flex-1 leading-relaxed">
-            <strong className="text-amber-100">일부 페이지 처리 안내:</strong> 전체 {pages.length}장 중 <strong>{failedCount}개 페이지</strong>의 번역 처리에 실패하여 원본 이미지가 그대로 유지되었습니다. ZIP 파일 내에도 원본 상태로 안전하게 보존되었습니다.
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start space-x-3 shadow-md">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0 text-amber-400 mt-0.5" />
+          <div className="flex-1 leading-relaxed space-y-1">
+            <p>
+              <strong className="text-amber-100">일부 페이지 처리 안내:</strong> 전체 {pages.length}장 중 <strong>{failedCount}개 페이지</strong>의 번역 처리에 실패하여 원본 이미지가 그대로 유지되었습니다. ZIP 파일 내에도 원본 상태로 안전하게 보존되었습니다.
+            </p>
+            {pages.some((p) => p.errorMsg) && (
+              <div className="p-2 bg-slate-950/80 rounded-lg text-[11px] font-mono text-amber-300 border border-amber-500/20 break-all">
+                ⚠️ API 오류 사유: {pages.find((p) => p.errorMsg)?.errorMsg}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -262,10 +269,17 @@ export default function ComparisonViewer({
             <FileImage className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
             <span className="truncate">파일명: {activePageName}</span>
             {isCurrentPageFailed && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                <AlertTriangle className="w-3 h-3 mr-1" />
-                번역 실패 (원본 보존)
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <AlertTriangle className="w-3 h-3 mr-1" />
+                  번역 실패
+                </span>
+                {currentPage?.errorMsg && (
+                  <span className="text-[10px] text-amber-400/90 font-mono truncate max-w-[180px]" title={currentPage.errorMsg}>
+                    ({currentPage.errorMsg})
+                  </span>
+                )}
+              </div>
             )}
             {isCurrentPageSafetyBlocked && (
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
