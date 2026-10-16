@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import JSZip from 'jszip';
-import { Upload, Image as ImageIcon, Sparkles, X, FileCheck, ArrowRight, Wand2, Archive, Files, Layers } from 'lucide-react';
+import { Upload, Image as ImageIcon, Sparkles, X, FileCheck, ArrowRight, Wand2, Archive, Files, Layers, Server, Globe } from 'lucide-react';
 
 export default function ImageUploader({
   selectedFile,
@@ -11,12 +11,14 @@ export default function ImageUploader({
   onStartTranslate,
   isTranslating,
   onLoadSample,
-  hasApiKey = false,
-  isFreeMode = false,
+  backendUrl = '',
+  onOpenSettings,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [isPacking, setIsPacking] = useState(false);
   const fileInputRef = useRef(null);
+
+  const hasBackendUrl = Boolean(backendUrl && backendUrl.trim());
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -155,8 +157,8 @@ export default function ImageUploader({
                 여러 장 동시 선택 지원
               </span>
               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-brand-400" />
-                나눔고딕 자동 식자
+                <Server className="w-3.5 h-3.5 mr-1.5 text-brand-400" />
+                manga-image-translator 고품질 식자
               </span>
             </div>
 
@@ -247,24 +249,30 @@ export default function ImageUploader({
                   </button>
                 </div>
 
-                <div className="mt-4 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-1">
-                  <p className="font-semibold text-slate-200 flex items-center gap-1.5">
-                    {isFreeMode || !hasApiKey ? (
-                      <span className="text-emerald-400 font-bold">⚡ 무료 / 게스트 모드 안내</span>
+                <div className="mt-4 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-slate-200 flex items-center gap-1.5">
+                      <Server className="w-3.5 h-3.5 text-brand-400" />
+                      <span>manga-image-translator 외부 서버 연동</span>
+                    </p>
+                    {hasBackendUrl ? (
+                      <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                        ● 백엔드 연결 설정됨
+                      </span>
                     ) : (
-                      <span className="text-brand-300 font-bold">✨ Gemini API 연동 모드 안내</span>
+                      <button
+                        type="button"
+                        onClick={onOpenSettings}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 underline font-medium"
+                      >
+                        ⚠️ 백엔드 주소 설정 필요
+                      </button>
                     )}
-                  </p>
+                  </div>
                   <p className="text-slate-400 leading-relaxed">
-                    {isFreeMode || !hasApiKey ? (
-                      isZip
-                        ? '압축 파일 내 만화 이미지들을 브라우저 Canvas 로컬 엔진으로 즉시 순회 식자 합성하여 최종 번역 ZIP 파일로 완성합니다. (네트워크 호출 없음)'
-                        : '브라우저 HTML5 Canvas를 사용하여 대사 마스킹 및 한국어 식자 텍스트를 즉시 합성하고 ZIP 다운로드 파일을 생성합니다. (네트워크 통신 없음)'
-                    ) : (
-                      isZip
-                        ? '압축 파일 내의 만화 이미지들을 순서대로 Gemini API 공식 엔드포인트로 직접 분석하여 대사를 번역하고 식자 합성한 뒤, 번역된 전체 ZIP 파일로 완성합니다.'
-                        : 'Google Gemini 비전 모델로 이미지 내 말풍선 텍스트와 좌표(0~1000)를 브라우저에서 직접 감지하고, 배경 마스킹 후 최적의 글자 크기로 한국어 대사를 합성합니다.'
-                    )}
+                    {isZip
+                      ? '압축 파일 내 만화 이미지들을 외부에 띄운 manga-image-translator 서버(/run 또는 /translate)로 순차 전송하여, 고품질 대사 인식 및 한국어 식자가 완료된 이미지들로 교체 패키징합니다.'
+                      : '외부 백엔드 서버로 원본 이미지를 전송(Multipart Form-data)하여 GPU 모델을 통해 말풍선 인식, 텍스트 인페인팅 및 한국어 식자 합성을 완료한 결과 이미지를 받아옵니다.'}
                   </p>
                 </div>
               </div>
@@ -283,21 +291,11 @@ export default function ImageUploader({
                   type="button"
                   onClick={onStartTranslate}
                   disabled={isTranslating || isPacking}
-                  className={`px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white transition shadow-lg flex items-center space-x-2 disabled:opacity-50 cursor-pointer ${
-                    isFreeMode || !hasApiKey
-                      ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 shadow-emerald-600/25'
-                      : 'bg-gradient-to-r from-brand-600 via-indigo-600 to-accent-600 hover:from-brand-500 hover:via-indigo-500 hover:to-accent-500 shadow-brand-500/25'
-                  }`}
+                  className="px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white transition shadow-lg flex items-center space-x-2 disabled:opacity-50 cursor-pointer bg-gradient-to-r from-brand-600 via-indigo-600 to-accent-600 hover:from-brand-500 hover:via-indigo-500 hover:to-accent-500 shadow-brand-500/25"
                 >
                   <Sparkles className="w-4 h-4 text-white" />
                   <span>
-                    {isFreeMode || !hasApiKey
-                      ? isZip
-                        ? '무료 게스트 모드로 ZIP 일괄 식자 시작'
-                        : '무료 게스트 모드로 식자 합성 시작'
-                      : isZip
-                      ? 'Gemini AI로 전체 일괄 번역 & 식자 시작'
-                      : '한국어로 번역 & 식자 합성 시작'}
+                    {isZip ? '백엔드로 ZIP 전체 일괄 번역 시작' : '백엔드로 한국어 번역 & 식자 시작'}
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>

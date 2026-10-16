@@ -1,28 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Sparkles, Languages, Type, CheckCircle2, Archive } from 'lucide-react';
+import { Loader2, Sparkles, Languages, Type, CheckCircle2, Archive, Server } from 'lucide-react';
 
 export default function TranslationProgress({
   isZip = false,
   pageCount = 0,
   currentPage = 0,
   progressText = '',
-  selectedModel = 'gemini-3.5-flash',
-  isFreeMode = false,
+  backendUrl = '',
 }) {
   const [currentStep, setCurrentStep] = useState(0);
-
-  const modelLabel = isFreeMode ? '무료 로컬 엔진' : selectedModel;
 
   const steps = isZip
     ? [
         { icon: Archive, label: `ZIP 압축 해제 및 ${pageCount > 0 ? `${pageCount}개 ` : ''}만화 이미지 분석` },
-        { icon: Languages, label: `${modelLabel} 대사 인식 및 한국어 번역` },
-        { icon: Type, label: 'HTML5 Canvas 한글 나눔고딕 식자 합성 및 ZIP 생성' },
+        { icon: Server, label: 'manga-image-translator 백엔드로 이미지 순차 전송' },
+        { icon: Type, label: '대사 인식 및 한국어(KOR) 식자 합성 이미지 취합 & ZIP 패키징' },
       ]
     : [
-        { icon: Sparkles, label: `${modelLabel}에 이미지 전달 및 말풍선 감지` },
-        { icon: Languages, label: '말풍선 좌표 정밀 분석 및 감정선 번역' },
-        { icon: Type, label: 'HTML5 Canvas 배경 마스킹 & 한글 자동 식자 합성' },
+        { icon: Sparkles, label: 'manga-image-translator 백엔드로 이미지 전송' },
+        { icon: Languages, label: '만화 텍스트 감지, 번역 및 배경 마스킹 처리' },
+        { icon: Type, label: '식자 완료된 바이너리 이미지 수신 및 뷰어 렌더링' },
       ];
 
   useEffect(() => {
@@ -57,13 +54,13 @@ export default function TranslationProgress({
 
       <div className="space-y-2">
         <h3 className="text-xl font-bold text-white tracking-tight">
-          {isZip ? 'ZIP 일괄 만화 번역 & 식자 합성 진행 중' : '만화 번역 및 식자 합성 진행 중'}
+          {isZip ? 'ZIP 일괄 만화 번역 & 식자 진행 중' : '만화 번역 및 식자 진행 중'}
         </h3>
         <p className="text-xs sm:text-sm text-slate-400">
           {progressText ||
             (isZip
-              ? `총 ${pageCount > 0 ? `${pageCount}장의 ` : ''}페이지를 순차 분석하고 있습니다.`
-              : '브라우저에서 직접 AI 대사 분석 및 고품질 한글 식자를 합성하고 있습니다.')}
+              ? `총 ${pageCount > 0 ? `${pageCount}장의 ` : ''}페이지를 백엔드로 순차 전송하고 있습니다.`
+              : '백엔드 서버에서 고성능 AI 대사 분석 및 한국어 식자 합성을 진행하고 있습니다.')}
         </p>
 
         {isZip && pageCount > 0 && (
