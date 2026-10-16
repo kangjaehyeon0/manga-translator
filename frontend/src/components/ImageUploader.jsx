@@ -1,6 +1,18 @@
 import React, { useState, useRef } from 'react';
 import JSZip from 'jszip';
-import { Upload, Image as ImageIcon, Sparkles, X, FileCheck, ArrowRight, Wand2, Archive, Files, Layers, Server, Globe } from 'lucide-react';
+import {
+  Upload,
+  Image as ImageIcon,
+  Sparkles,
+  Zap,
+  X,
+  ArrowRight,
+  Wand2,
+  Archive,
+  Files,
+  Layers,
+  Key,
+} from 'lucide-react';
 
 export default function ImageUploader({
   selectedFile,
@@ -11,14 +23,19 @@ export default function ImageUploader({
   onStartTranslate,
   isTranslating,
   onLoadSample,
-  backendUrl = '',
+  engine = 'deepl',
+  geminiApiKey = '',
+  deeplApiKey = '',
   onOpenSettings,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [isPacking, setIsPacking] = useState(false);
   const fileInputRef = useRef(null);
 
-  const hasBackendUrl = Boolean(backendUrl && backendUrl.trim());
+  const isDeepL = engine === 'deepl';
+  const hasActiveKey = isDeepL
+    ? Boolean(deeplApiKey && deeplApiKey.trim())
+    : Boolean(geminiApiKey && geminiApiKey.trim());
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -148,6 +165,24 @@ export default function ImageUploader({
             </div>
 
             <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
+              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${
+                isDeepL
+                  ? 'bg-accent-500/10 text-accent-300 border-accent-500/30'
+                  : 'bg-brand-500/10 text-brand-300 border-brand-500/30'
+              }`}>
+                {isDeepL ? (
+                  <>
+                    <Zap className="w-3.5 h-3.5 mr-1.5 text-accent-400" />
+                    DeepL NMT 신경망 번역 엔진 활성화
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5 text-brand-400" />
+                    Google Gemini 1.5 Flash 비전 엔진 활성화
+                  </>
+                )}
+              </span>
+
               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
                 <Archive className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
                 ZIP 대용량 일괄 번역 지원
@@ -155,10 +190,6 @@ export default function ImageUploader({
               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
                 <Files className="w-3.5 h-3.5 mr-1.5 text-sky-400" />
                 여러 장 동시 선택 지원
-              </span>
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                <Server className="w-3.5 h-3.5 mr-1.5 text-brand-400" />
-                manga-image-translator 고품질 식자
               </span>
             </div>
 
@@ -168,7 +199,7 @@ export default function ImageUploader({
                 <button
                   type="button"
                   onClick={onLoadSample}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 hover:border-brand-500/50 transition-all"
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 hover:border-brand-500/50 transition-all cursor-pointer"
                 >
                   <Wand2 className="w-3.5 h-3.5 text-amber-400" />
                   <span>샘플 만화 컷으로 즉시 체험해보기</span>
@@ -252,27 +283,36 @@ export default function ImageUploader({
                 <div className="mt-4 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <p className="font-semibold text-slate-200 flex items-center gap-1.5">
-                      <Server className="w-3.5 h-3.5 text-brand-400" />
-                      <span>manga-image-translator 외부 서버 연동</span>
+                      {isDeepL ? (
+                        <>
+                          <Zap className="w-3.5 h-3.5 text-accent-400" />
+                          <span>DeepL API 고품질 신경망 번역 모드</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+                          <span>Google Gemini 1.5 Flash 비전 번역 모드</span>
+                        </>
+                      )}
                     </p>
-                    {hasBackendUrl ? (
+                    {hasActiveKey ? (
                       <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
-                        ● 백엔드 연결 설정됨
+                        ● {isDeepL ? 'DeepL API 키 설정됨' : 'Gemini API 키 설정됨'}
                       </span>
                     ) : (
                       <button
                         type="button"
                         onClick={onOpenSettings}
-                        className="text-[11px] text-amber-400 hover:text-amber-300 underline font-medium"
+                        className="text-[11px] text-amber-400 hover:text-amber-300 underline font-medium cursor-pointer"
                       >
-                        ⚠️ 백엔드 주소 설정 필요
+                        ⚠️ {isDeepL ? 'DeepL' : 'Gemini'} API 키 설정 필요
                       </button>
                     )}
                   </div>
                   <p className="text-slate-400 leading-relaxed">
-                    {isZip
-                      ? '압축 파일 내 만화 이미지들을 외부에 띄운 manga-image-translator 서버(/run 또는 /translate)로 순차 전송하여, 고품질 대사 인식 및 한국어 식자가 완료된 이미지들로 교체 패키징합니다.'
-                      : '외부 백엔드 서버로 원본 이미지를 전송(Multipart Form-data)하여 GPU 모델을 통해 말풍선 인식, 텍스트 인페인팅 및 한국어 식자 합성을 완료한 결과 이미지를 받아옵니다.'}
+                    {isDeepL
+                      ? '이미지 내 일본어 말풍선과 원문 대사를 추출한 뒤 DeepL 공식 무료 엔드포인트(api-free.deepl.com)로 일괄 번역하여 HTML5 Canvas로 한글 폰트를 식자 합성합니다.'
+                      : 'Google Gemini 1.5 Flash 모델이 말풍선 영역(0-1000) 감지와 번역을 수행하며, 무검열(BLOCK_NONE) 및 2초 순차 요청 딜레이 안전장치가 적용됩니다.'}
                   </p>
                 </div>
               </div>
@@ -293,9 +333,15 @@ export default function ImageUploader({
                   disabled={isTranslating || isPacking}
                   className="px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white transition shadow-lg flex items-center space-x-2 disabled:opacity-50 cursor-pointer bg-gradient-to-r from-brand-600 via-indigo-600 to-accent-600 hover:from-brand-500 hover:via-indigo-500 hover:to-accent-500 shadow-brand-500/25"
                 >
-                  <Sparkles className="w-4 h-4 text-white" />
+                  {isDeepL ? (
+                    <Zap className="w-4 h-4 text-white" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-white" />
+                  )}
                   <span>
-                    {isZip ? '백엔드로 ZIP 전체 일괄 번역 시작' : '백엔드로 한국어 번역 & 식자 시작'}
+                    {isZip
+                      ? `${isDeepL ? 'DeepL로' : 'Gemini로'} ZIP 전체 일괄 번역 시작`
+                      : `${isDeepL ? 'DeepL로' : 'Gemini로'} 한국어 번역 & 식자 시작`}
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>

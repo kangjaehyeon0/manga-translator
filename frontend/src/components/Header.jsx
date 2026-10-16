@@ -1,22 +1,16 @@
 import React from 'react';
-import { Sparkles, Server, CheckCircle, AlertCircle, Globe } from 'lucide-react';
+import { Sparkles, Zap, CheckCircle, AlertCircle, Key, Settings } from 'lucide-react';
 
 export default function Header({
-  backendUrl = '',
+  engine = 'deepl',
+  geminiApiKey = '',
+  deeplApiKey = '',
   onOpenKeyModal,
 }) {
-  const hasBackendUrl = Boolean(backendUrl && backendUrl.trim());
-
-  // URL에서 호스트명만 간결하게 추출 (UI 배너용)
-  let displayHost = '';
-  if (hasBackendUrl) {
-    try {
-      const parsed = new URL(backendUrl.startsWith('http') ? backendUrl : `http://${backendUrl}`);
-      displayHost = parsed.host || backendUrl;
-    } catch (_) {
-      displayHost = backendUrl.length > 24 ? backendUrl.slice(0, 24) + '...' : backendUrl;
-    }
-  }
+  const isDeepL = engine === 'deepl';
+  const hasActiveKey = isDeepL
+    ? Boolean(deeplApiKey && deeplApiKey.trim())
+    : Boolean(geminiApiKey && geminiApiKey.trim());
 
   return (
     <header className="sticky top-0 z-40 w-full glass-panel border-b border-slate-800/80 px-4 sm:px-8 py-3.5 backdrop-blur-md bg-slate-950/80">
@@ -31,12 +25,26 @@ export default function Header({
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-lg font-bold text-white tracking-tight">MangaTrans</h1>
-              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 text-[11px] font-semibold bg-brand-500/10 text-brand-300 border border-brand-500/30 rounded-full">
-                <span>manga-image-translator</span>
+              <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-full border ${
+                isDeepL
+                  ? 'bg-accent-500/10 text-accent-300 border-accent-500/30'
+                  : 'bg-brand-500/10 text-brand-300 border-brand-500/30'
+              }`}>
+                {isDeepL ? (
+                  <>
+                    <Zap className="w-3 h-3 text-accent-400 mr-0.5" />
+                    <span>DeepL API</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3 text-brand-400 mr-0.5" />
+                    <span>Gemini 1.5 Flash</span>
+                  </>
+                )}
               </span>
             </div>
             <p className="text-xs text-slate-400 hidden sm:block">
-              AI 만화 말풍선 인식 & 한국어 식자(Typesetting) 합성 웹 인터페이스
+              만화 대사 자동 인식 & 한국어 고품질 식자(Typesetting) 합성 시스템
             </p>
           </div>
         </div>
@@ -45,28 +53,35 @@ export default function Header({
         <div className="flex items-center space-x-2.5">
           <button
             onClick={onOpenKeyModal}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 border ${
-              hasBackendUrl
-                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
-                : 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20 animate-pulse'
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border cursor-pointer ${
+              hasActiveKey
+                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20 shadow-sm'
+                : 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20 animate-pulse shadow-sm'
             }`}
-            title="백엔드 API 서버 URL 설정 열기"
+            title="번역 엔진 및 API 키 설정 열기"
           >
-            {hasBackendUrl ? (
+            {hasActiveKey ? (
               <>
-                <Server className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="max-w-[150px] sm:max-w-[200px] truncate">
-                  서버: {displayHost}
-                </span>
+                <Key className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{isDeepL ? 'DeepL 키 연동됨' : 'Gemini 키 연동됨'}</span>
                 <CheckCircle className="w-3.5 h-3.5 text-emerald-400 ml-0.5 flex-shrink-0" />
               </>
             ) : (
               <>
-                <Globe className="w-3.5 h-3.5 text-amber-400" />
-                <span>백엔드 주소 설정 필요</span>
+                <Key className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isDeepL ? 'DeepL API 키 설정 필요' : 'Gemini API 키 설정 필요'}</span>
                 <AlertCircle className="w-3.5 h-3.5 text-amber-400 ml-0.5 flex-shrink-0" />
               </>
             )}
+          </button>
+
+          <button
+            onClick={onOpenKeyModal}
+            className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 transition"
+            title="엔진 및 API 설정"
+            aria-label="설정"
+          >
+            <Settings className="w-4 h-4 text-slate-400 hover:text-white" />
           </button>
         </div>
       </div>

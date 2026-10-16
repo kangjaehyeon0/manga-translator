@@ -228,6 +228,26 @@ export function generateFreeModeDetections() {
 }
 
 /**
+ * 일본어 원문 대사 및 말풍선 감지 템플릿 (DeepL 모드 테스트/폴백용)
+ */
+export function generateSampleJapaneseDetections() {
+  return [
+    {
+      box_2d: [110, 140, 250, 480],
+      original_text: '信じられない！この力は一体…？！',
+    },
+    {
+      box_2d: [140, 570, 275, 870],
+      original_text: '待て…！これは現実なのか？！',
+    },
+    {
+      box_2d: [770, 210, 930, 820],
+      original_text: '今こそ全てを終わらせる時だ！DeepL神経網翻訳エンジン発動！',
+    },
+  ];
+}
+
+/**
  * Gemini AI 안전 필터(SAFETY Block) 차단 시 대체 식자 데이터 생성
  * 성인/선정성/민감성 검열로 인해 AI 응답이 거부되었을 때 원본 이미지에 로컬 대체 식자를 적용합니다.
  */

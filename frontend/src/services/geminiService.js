@@ -204,11 +204,13 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob, f
 
   const cleanKey = apiKey.trim();
 
-  // 모델명 정규화 및 가용 모델 목록 구성 (404/503 시 자동 폴백)
+  // 모델명 정규화 및 가용 모델 목록 구성 (gemini-1.5-flash 최우선)
   const candidateModels = [];
-  if (model && model.startsWith('gemini-') && !model.includes('1.5') && !model.includes('2.5')) {
+  if (model) {
     candidateModels.push(model);
   }
+  if (!candidateModels.includes('gemini-1.5-flash')) candidateModels.push('gemini-1.5-flash');
+  if (!candidateModels.includes('gemini-2.0-flash')) candidateModels.push('gemini-2.0-flash');
   if (!candidateModels.includes('gemini-3.5-flash')) candidateModels.push('gemini-3.5-flash');
   if (!candidateModels.includes('gemini-flash-latest')) candidateModels.push('gemini-flash-latest');
   if (!candidateModels.includes('gemini-3.8-flash')) candidateModels.push('gemini-3.8-flash');
@@ -385,3 +387,126 @@ export async function detectAndTranslateWithGemini({ apiKey, model, imageBlob, f
   const detections = parseGeminiJsonResponse(textContent);
   return detections;
 }
+
+export const EXTRACT_ONLY_PROMPT = `Extract Japanese text and dialogue from speech bubbles in this manga page, with 2D coordinates [ymin, xmin, ymax, xmax] scaled 0-1000.
+Do NOT translate the text. Extract the exact original Japanese text faithfully.
+Output valid JSON array only:
+[
+  {
+    "box_2d": [ymin, xmin, ymax, xmax],
+    "original_text": "원문 일본어 대사"
+  }
+]`;
+
+/**
+ * DeepL 파이프라인 1단계: 만화 이미지에서 원문 일본어 대사 및 말풍선 좌표([ymin, xmin, ymax, xmax])만 추출
+ * @param {Object} params
+ * @param {string} params.apiKey - Gemini API 키
+ * @param {string} [params.model] - 모델명 (기본: gemini-1.5-flash)
+ * @param {Blob|File} params.imageBlob - 만화 이미지 Blob 또는 File
+ * @param {string} [params.fileName] - 파일명
+ * @returns {Promise<Array<{box_2d: number[], original_text: string}>>}
+ */
+export async function extractJapaneseDialogues({ apiKey, model, imageBlob, fileName = '' }) {
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error('대사 인식을 위한 Gemini API 키가 설정되지 않았습니다.');
+  }
+
+  const cleanKey = apiKey.trim();
+  const candidateModels = [];
+  if (model) candidateModels.push(model);
+  if (!candidateModels.includes('gemini-1.5-flash')) candidateModels.push('gemini-1.5-flash');
+  if (!candidateModels.includes('gemini-2.0-flash')) candidateModels.push('gemini-2.0-flash');
+  if (!candidateModels.includes('gemini-3.5-flash')) candidateModels.push('gemini-3.5-flash');
+  if (!candidateModels.includes('gemini-flash-latest')) candidateModels.push('gemini-flash-latest');
+  if (!candidateModels.includes('gemini-3.8-flash')) candidateModels.push('gemini-3.8-flash');
+
+  const { mimeType, base64Data } = await blobToBase64(imageBlob, fileName);
+
+  const buildPayload = (safety) => ({
+    contents: [
+      {
+        parts: [
+          {
+            text: EXTRACT_ONLY_PROMPT,
+          },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: base64Data,
+            },
+          },
+        ],
+      },
+    ],
+    safetySettings: safety,
+  });
+
+  let response = null;
+  let lastUsedModel = candidateModels[0];
+
+  for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
+    lastUsedModel = candidateModels[mIdx];
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${lastUsedModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload(NONE_SAFETY_SETTINGS)),
+      });
+
+      if (!response.ok && response.status === 400) {
+        try {
+          const errorJson = await response.clone().json();
+          const msg = errorJson?.error?.message || '';
+          if (msg.includes('safety') || msg.includes('BLOCK_NONE') || msg.includes('Invalid') || msg.includes('allowed')) {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(buildPayload(LENIENT_SAFETY_SETTINGS)),
+            });
+          }
+        } catch (_) {}
+      }
+
+      if (!response.ok && (response.status === 404 || response.status === 503) && mIdx < candidateModels.length - 1) {
+        continue;
+      }
+
+      break;
+    } catch (netErr) {
+      if (mIdx === candidateModels.length - 1) {
+        throw new Error(`대사 감지 모델 연결 실패: ${netErr.message}`);
+      }
+    }
+  }
+
+  if (!response.ok) {
+    let errorDetails = null;
+    let errorMessage = `대사 감지 실패 (HTTP ${response.status})`;
+    try {
+      errorDetails = await response.json();
+      if (errorDetails?.error?.message) {
+        errorMessage = `대사 감지 오류: ${errorDetails.error.message}`;
+      }
+    } catch (_) {}
+
+    const err = new Error(errorMessage);
+    err.status = response.status;
+    err.details = errorDetails;
+    throw err;
+  }
+
+  const responseData = await response.json();
+  const candidate = responseData?.candidates?.[0];
+  const parts = candidate?.content?.parts || [];
+  const textContent = parts.map((p) => p.text || '').filter(Boolean).join('\n');
+
+  if (!textContent.trim()) {
+    return [];
+  }
+
+  return parseGeminiJsonResponse(textContent);
+}
+

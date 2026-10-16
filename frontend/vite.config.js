@@ -7,5 +7,12 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    proxy: {
+      '/api-deepl': {
+        target: 'https://api-free.deepl.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-deepl/, ''),
+      },
+    },
   },
 });
